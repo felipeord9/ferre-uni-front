@@ -1,0 +1,118 @@
+.toggle-container {
+  width: 40px;
+  height: 20px;
+  box-shadow: inset 4px 4px 6px #cecece;
+}
+
+.toggle {
+  left: 0;
+  width: 20px;
+  height: 20px;
+  transform: scale(.7);
+  transition: all ease-out .3s;
+}
+
+.toggle.active {
+  left: 18px;
+}
+
+.toggle-container {
+  width: 40px;
+  height: 20px;
+  box-shadow: inset 4px 4px 6px #cecece;
+}
+
+.input-select {
+  position: absolute;
+  height: 100%;
+  width: calc(100% - 37px) !important;
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
+.toggle {
+  left: 0;
+  width: 20px;
+  height: 20px;
+  transform: scale(.7);
+  transition: all ease-out .3s;
+}
+
+.select-um{
+  display: flex;
+  width: 15%;
+}
+
+.toggle.active {
+  left: 18px;
+}
+
+.img-gramera{
+  width: 90px;
+  height: 90px;
+  display: flex;
+}
+
+.modalidad-pago{
+    display: flex;
+    flex-direction: row;
+}
+
+.text-img{
+  display: flex;
+  font-size: x-large;
+}
+
+.text-img2{
+  display: flex;
+  font-size: medium;
+}
+
+.input-container {
+  display: flex;
+  align-items: center;
+}
+
+.input-con-sufijo {
+  padding-right: 40px; /* Asegúrate de dejar espacio suficiente para el sufijo */
+}
+
+.sufijo {
+  position: absolute;
+  right: 10px; /* Ajusta según el espacio necesario */
+  pointer-events: none; /* Evita que el sufijo interfiera con la interacción con el input */
+}
+
+.head-form{
+  display: flex;
+  flex-direction: row;
+}
+
+.img-head{
+  display: flex;
+}
+
+@media (max-width: 900px) {
+  .img-gramera{
+    width: 60px;
+    height: 60px;
+  }
+  .text-img{
+    font-size: medium;
+  }
+  .text-img2{
+    font-size: small;
+  }
+  .select-um{
+    width: 33%;
+  }
+  .head-form{
+    flex-direction: column;
+  }
+  .img-head{
+    display: none;
+  }
+  .modalidad-pago{
+    flex-direction: row;
+  }
+}
