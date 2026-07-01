@@ -19,8 +19,8 @@ export default function InputPassword({ id, label, password, setPassword }) {
     <div className="input-group ms-0 ps-0 w-100 d-flex" style={{fontSize: 13.5}}>
       <span 
         onClick={togglePasswordVisibility}
-        style={{ right: 10, cursor: "pointer" }}
-        className="input-group-text bg-white ms-0"
+        style={{ right: 10, cursor: "pointer", backgroundColor:'#E64002', color: 'white'}}
+        className="input-group-text ms-0"
       ><i class="bi bi-person-fill">
         {showPassword ? <FaUnlock /> : <FaLock />}
       </i></span>
@@ -28,7 +28,7 @@ export default function InputPassword({ id, label, password, setPassword }) {
         id={id}
         type={showPassword ? "text" : "password"}
         placeholder= {showPassword ? 'Contraseña' : "**********"}
-        className="form-control form-control-sm shadow-sm"
+        className="form-control form-control-sm shadow-sm border border-2"
         onChange={handleChange}
         style={{ paddingRight: 33 }}
         autoComplete="off"

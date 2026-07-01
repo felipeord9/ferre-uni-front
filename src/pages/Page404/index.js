@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import Logo from "../../assets/logo-el-gran-langostino.png";
+import Logo from "../../assets/images.png";
+import './styles.css'
 
 export default function Page404() {
   //logica para saber si es celular
@@ -20,10 +21,10 @@ export default function Page404() {
   }, []);
 
   return (
-    <div className="d-flex justify-content-center align-items-center h-100 w-100 m-auto">
+    <div className="wra d-flex justify-content-center align-items-center h-100 w-100 m-auto">
       <div
         className={`card ${isMobile ? 'p-3':'p-5'} shadow rounded-4 m-auto`}
-        style={{ maxWidth: 370, border: '3px solid #007bff' }}
+        style={{ maxWidth: 370, border: '3px solid #018B3D ' }}
       >
         <div className="mb-3 p-2">
           <img src={Logo} className="w-100" alt="logo" />

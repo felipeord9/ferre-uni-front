@@ -8,6 +8,14 @@
   background-position: center;
 } */
 
+.verde {
+    color: rgb(1, 139, 61);   /* #018B3D */
+}
+
+.naranja {
+    color: rgb(230, 64, 2);   /* #E64002 */
+}
+
 :root {
   --bg: #f3f6fb;
   --panel: #ffffff;
@@ -15,7 +23,9 @@
   --ink: #0f172a;
   --muted: #64748b;
   --line: #d9e2ef;
-  --nav: #10213f;
+  --nav: linear-gradient(180deg, #015b28 0%, #015425 50%, #111827 100%);
+  /* --nav: #17492a */
+  /* --nav: #10213f; */
   --nav-2: #17345f;
   --blue: #2563eb;
   --green: #0f766e;
@@ -38,6 +48,28 @@
   --shadow: 0 18px 42px rgba(0, 0, 0, .32);
 }
 
+.dark {
+  --background-principal: #0f172a;
+  --background-panel: #1e293b;
+  --texto-principal: #f8fafc;
+  --texto-mutado: #94a3b8;
+  --borde: #334155;
+  --bg: #0b1120;
+  --panel: #111827;
+  --panel-2: #172033;
+  --ink: #e5e7eb;
+  --muted: #9ca3af;
+  --line: #263348;
+  --nav: #050b16;
+  --nav-2: #111827;
+  --shadow: 0 18px 42px rgba(0, 0, 0, .32);
+}
+
+.panel {
+  background-color: var(--background-panel);
+  border: 1px solid var(--borde);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -47,8 +79,9 @@
 
 body {
   min-height: 100vh;
-  background: var(--bg);
-  color: var(--ink);
+  background-color: var(--background-principal);
+  color: var(--texto-principal);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 [hidden] {
@@ -92,7 +125,7 @@ label {
   grid-template-columns: minmax(320px, 440px) 1fr;
   background:
     linear-gradient(120deg, rgba(16, 33, 63, .95), rgba(15, 118, 110, .5)),
-    url("https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=1800&q=80") center/cover;
+    url("../src/assets/fondo.png") center/cover;
 }
 
 .login-card {
@@ -129,8 +162,19 @@ label {
   border-radius: var(--radius);
   display: grid;
   place-items: center;
-  background: var(--blue);
+  /* background: var(--blue); */
   color: #fff;
+}
+
+.brand-icon2 {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius);
+  display: grid;
+  place-items: center;
+  background: #E64002;
+  color: #fff;
+  margin-left: 0;
 }
 
 .login-hero {
@@ -264,8 +308,8 @@ label {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: #e8eef7;
-  color: #10213f;
+  background: #E64002;
+  color: white;
   font-weight: 900;
 }
 

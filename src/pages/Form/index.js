@@ -12,7 +12,7 @@ import AuthContext from "../../context/authContext";
 import ComboBox from "../../components/ComboBox";
 import { sendEvidence, verificarArchivo } from "../../services/evidence";
 import { Modal } from "react-bootstrap";
-import Icono from "../../assets/icon.png";
+import Icono from "../../assets/logoRedondo.png";
 import Webcam from "react-webcam";
 import { useParams } from "react-router-dom";
 import { config } from "../../config";
