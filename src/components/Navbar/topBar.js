@@ -1,10 +1,12 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { AppContext } from '../../context/AppContext';
+import { useLocation } from 'react-router-dom';
 import * as Icons from 'lucide-react';
 
-export default function Topbar({ setSidebarOpen }) {
+export default function Topbar({ setSidebarOpen, selectedOption }) {
   /* const { currentModule, config, toggleTheme, reloadActiveModule } = useContext(AppContext); */
   const { theme, toggleTheme } = useContext(AppContext); 
+  const location = useLocation();
 
   //logica para saber si es celular
   const [isMobile, setIsMobile] = useState(false);
@@ -37,8 +39,8 @@ export default function Topbar({ setSidebarOpen }) {
       }
 
       <div>
-        <h4 className='mb-0'>Inicio</h4>
-        <p>Resumen ejecutivo</p>
+        <h4 className='mb-0'>{selectedOption ? selectedOption.title : 'Inicio'}</h4>
+        <p>{selectedOption ? selectedOption.description : 'Resumen ejecutivo del portal.'}</p>
       </div>
 
       <div className="top-actions">
@@ -56,7 +58,7 @@ export default function Topbar({ setSidebarOpen }) {
           )}
         </button>
 
-        <button className="btn secondary">
+        <button className="btn secondary" onClick={(e)=> window.location.reload()}>
           <Icons.RefreshCw size={16} /> Actualizar
         </button>
       </div>

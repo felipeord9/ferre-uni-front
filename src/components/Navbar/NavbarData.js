@@ -3,41 +3,71 @@ import * as AiIcons from "react-icons/ai"
 import { CgFileAdd } from "react-icons/cg";
 import { FaUsersGear } from "react-icons/fa6";
 import { ImInsertTemplate } from "react-icons/im";
+import { FiHome } from "react-icons/fi";
+import { IoIosTrendingUp } from "react-icons/io";
+import { CgSearchFound } from "react-icons/cg";
+import { FiPackage } from "react-icons/fi";
+import { CiSettings } from "react-icons/ci";
 
 export const NavBarData = [
   {
-    title: "Nuevo servicio",
-    path: "/form",
-    icon: <CgFileAdd />,
-    cName: "nav-text",
-    access: ['admin', 'usuario']
-  },
-  {
-    title: "Tabla servicios",
+    id: 1,
+    title: "Inicio",
     path: "/inicio",
-    icon: <MdIcons.MdOutlineInventory />,
+    icon: <FiHome />,
     cName: "nav-text",
+    description: 'Resumen ejecutivo del portal.',
+    type: 'native',
+    version: '1.0.0',
+    active: true,
     access: ['admin', 'usuario']
   },
   {
-    title: "Conductores",
-    path: "/drivers",
-    icon: <FaUsersGear />,
+    id: 2,
+    title: "Ventas",
+    path: "/ventas",
+    icon: <IoIosTrendingUp />,
     cName: "nav-text",
+    description: 'Dashboard avanzado de ventas.',
+    type: 'native',
+    version: '1.0.0',
+    active: true,
+    access: ['admin', 'usuario']
+  },
+  {
+    id: 3,
+    title: "Inventario",
+    path: "/inventario",
+    icon: <FiPackage />,
+    cName: "nav-text",
+    description: 'Resumen inventario del portal.',
+    type: 'native',
+    version: '1.0.0',
+    active: true,
     access: ['admin']
   },
   {
-    title: "Placas",
-    path: "/plates",
-    icon: <ImInsertTemplate />,
+    id: 4,
+    title: "Control Interno",
+    path: "/control/interno",
+    icon: <CgSearchFound />,
     cName: "nav-text",
+    description: 'Resumen control interno del portal.',
+    type: 'native',
+    version: '1.0.0',
+    active: false,
     access: ['admin']
   },
   {
-    title: "Usuarios",
-    path: "/usuarios",
-    icon: <AiIcons.AiOutlineUser />,
+    id: 5,
+    title: "Administración",
+    path: "/administracion",
+    icon: <CiSettings />,
     cName: "nav-text",
+    description: 'Administración del portal.',
+    type: 'native',
+    version: '1.0.0',
+    active: true,
     access: ['admin']
   },
 ];

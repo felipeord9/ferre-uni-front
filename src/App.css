@@ -23,7 +23,9 @@
   --ink: #0f172a;
   --muted: #64748b;
   --line: #d9e2ef;
-  --nav: linear-gradient(180deg, #015b28 0%, #015425 50%, #111827 100%);
+  /* --nav: linear-gradient(180deg, #015b28 0%, #015425 50%, #111827 100%); */
+  --nav: linear-gradient(135deg, #018B3D 0%, #015726 60%, #003316 100%);
+  /* --nav: linear-gradient(180deg, #018B3D 0%, #0f2419 50%, #0f172a 100%); */
   /* --nav: #17492a */
   /* --nav: #10213f; */
   --nav-2: #17345f;
@@ -34,6 +36,12 @@
   --purple: #6d28d9;
   --shadow: 0 16px 36px rgba(15, 23, 42, .08);
   --radius: 8px;
+}
+
+.module-menu button.active {
+  background: rgba(255, 255, 255, 0.15); /* Crea un efecto de cristal sutil */
+  color: #ffffff;
+  font-weight: 600;
 }
 
 [data-theme="dark"] {
@@ -153,7 +161,7 @@ label {
 .brand-block p,
 .hint {
   color: #64748b;
-  line-height: 1.45;
+  line-height: 1.40;
 }
 
 .brand-icon {
@@ -633,7 +641,7 @@ tr:hover td {
 
 .check-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(150px, 1fr));
+  grid-template-columns: repeat(1, minmax(150px, 1fr));
   gap: 8px;
 }
 

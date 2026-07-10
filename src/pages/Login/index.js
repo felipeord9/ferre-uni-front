@@ -18,7 +18,7 @@ export default function Login() {
 
   useEffect(() => {
     if (
-      isLogged && user.role==='admin' || isLogged && user.role==='usuario'
+      isLogged /* && user.role==='admin' */
      ){
       navigate('/inicio')
     }

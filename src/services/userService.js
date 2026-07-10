@@ -42,3 +42,21 @@ export const updateUser = async (id, body) => {
   })
   return data
 }
+
+export const deleteUserByUsername = async (username) => {
+  const token = JSON.parse(localStorage.getItem("token"))
+  const { data } = await axios.delete(`${url}/delete/${username}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  })
+  return data
+};
+/* return fetch(`${url}/delete/${username}`, {
+  method: "DELETE",
+  headers: {
+    "Content-Type": "application/json",
+  },
+})
+  .then((res) => res.json())
+  .then((res) => res); */

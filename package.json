@@ -25,6 +25,7 @@
     "react-router-dom": "6.12.0",
     "react-scripts": "5.0.1",
     "react-webcam": "^7.2.0",
+    "recharts": "^3.9.2",
     "sweetalert": "^2.1.2",
     "sweetalert2": "11.7.12",
     "web-vitals": "2.1.4",

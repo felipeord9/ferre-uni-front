@@ -1,5 +1,5 @@
 import { useState, useContext, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, Outlet } from "react-router-dom";
 import * as FiIcons from "react-icons/fi";
 import * as FaIcons from "react-icons/fa";
 import AuthContext from "../../context/authContext";
@@ -16,16 +16,9 @@ export default function Navbar() {
   const { user, setUser } = useContext(AuthContext);
   const [ sidebarOpen, setSidebarOpen ] = useState(false);
   const [ searchResults, setSearchResults ] = useState('');
+  const [ selectedOption, setSelectedOption ] = useState('');
   const [ activeModuleContent, setActiveModuleContent ] = useState('');
   const navigate = useNavigate();
-
-  const handleClickImg = (e) => {
-    if(user.role==='aprobador'){
-      return navigate('/solicitudes')
-    }else{
-      return navigate('/inicio')
-    }
-  }
 
   //logica para saber si es celular
   const [isMobile, setIsMobile] = useState(false);
@@ -49,19 +42,27 @@ export default function Navbar() {
       {isLogged && (
         <section className="app-view">
           {/* Panel Lateral */}
-          <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+          <Sidebar 
+            isOpen={sidebarOpen} 
+            setIsOpen={setSidebarOpen}
+            selectedOption={selectedOption}
+            setSelectedOption={setSelectedOption}
+          />
 
           <main className="main">
             {/* Barra Superior */}
-            <Topbar setSidebarOpen={setSidebarOpen} />
+            <Topbar 
+              setSidebarOpen={setSidebarOpen} 
+              selectedOption={selectedOption}
+            />
             
-            {/* Contenedor de Módulos Dinámicos */}
-            {/* <section className="content">
-              {activeModuleContent}
-            </section> */}
+            <section className="content">
+              <Outlet /> 
+            </section>
           </main>
         </section>
       )}
     </>
   );
 }
+
