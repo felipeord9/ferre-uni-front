@@ -1,19 +1,25 @@
-import React, { useContext, useEffect, useState } from 'react';
-import { AppContext } from '../../context/AppContext';
-import AuthContext from '../../context/authContext'; 
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import KpiCard from '../../components/KpiCard';
-import { NavBarData } from "../../components/Navbar/NavbarData";
-import { useNavigate } from 'react-router-dom';
-import useUser from '../../hooks/useUser';
+import { findBudgets } from '../../services/budgetService';
+import KpiCardMargen from '../../components/KpiCardMargen';
+import { FaFileExcel, FaDownload } from 'react-icons/fa';
+import AuthContext from '../../context/authContext';
+import { FaUnlock } from "react-icons/fa";
+import { FaLock } from "react-icons/fa";
+import { BsCloudUploadFill } from 'react-icons/bs';
+import { MdRefresh, MdAddCircle } from 'react-icons/md';
 import { 
     BarChart, Bar, 
     Cell, XAxis, YAxis, 
     Tooltip, ResponsiveContainer, 
     CartesianGrid,
     AreaChart, Area,
-    Legend, Pie, PieChart
+    Legend, Pie, PieChart,
+    LabelList
 } from 'recharts';
 import * as Icons from 'lucide-react';
+import { FiUpload } from 'react-icons/fi';
+import Select from 'react-select';
 import * as XLSX from 'xlsx';
 import Swal from 'sweetalert2';
 
@@ -21,28 +27,353 @@ const COLORES_RANKING_VENDEDORES = ['#0d6efd', '#198754', '#ffc107', '#dc3545', 
 const COLORES_RANKING_CLIENTES = ['#1cc88a', '#4e73df', '#e74a3b', '#f6c23e', '#36b9cc'];
 const COLORES_LINEA = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#6f42c1'];
 
+//estilos personalidados para el select multiple
+/* const customSelectStyles = {
+  control: (base) => ({
+    ...base,
+    borderRadius: '0.375rem',
+    borderColor: '#dee2e6',
+    minHeight: '30px',
+    maxHeight: '60px',
+    overflowY: 'auto',
+    boxShadow: 'none',
+    '&:hover': { borderColor: '#86b7fe' }
+  })
+}; */
+
+const customSelectStyles2 = {
+  // 1. Contenedor principal del input
+  control: (base, state) => ({
+    ...base,
+    borderRadius: 'var(--radius, 0.375rem)',
+    backgroundColor: 'var(--panel, #ffffff)',
+    borderColor: state.isFocused ? 'var(--blue, #2563eb)' : 'var(--line, #d9e2ef)',
+    color: 'var(--ink, #0f172a)',
+    minHeight: '30px',
+    maxHeight: '50px',
+    overflowY: 'auto',
+    alignItems: 'flex-start',
+    boxShadow: 'none',
+    '&:hover': { 
+      borderColor: 'var(--blue, #2563eb)' 
+    }
+  }),
+
+  menu: (base) => ({
+    ...base,
+    backgroundColor: 'var(--panel, #ffffff)',
+    borderColor: 'var(--line, #d9e2ef)',
+    boxShadow: 'var(--shadow)',
+    borderRadius: 'var(--radius, 8px)',
+    zIndex: 9999
+  }),
+
+  // 2. Contenedor interno donde conviven el buscador y los badges
+  valueContainer: (base) => ({
+    ...base,
+    display: 'flex',
+    flexDirection: 'column-reverse', // Buscador arriba, badges abajo
+    alignItems: 'stretch',
+    padding: '2px 4px', // 🎯 Reducido para maximizar el área de lectura
+    gap: '4px',
+    position: 'relative'
+  }),
+
+  // 3. Contenedor de la X global y la flechita
+  indicatorsContainer: (base) => ({
+    ...base,
+    alignSelf: 'flex-start',
+    paddingTop: '15px',
+    paddingBottom: '0',
+    paddingLeft: '0',
+    paddingRight: '2px',
+    margin: '0'
+  }),
+
+  // 🎯 4. Reducción y pegado de la 'X' de limpiar todo (Clear Indicator)
+  clearIndicator: (base) => ({
+    ...base,
+    padding: '2px 3px', // 👈 Reduce el espaciado
+    cursor: 'pointer',
+    color: 'var(--muted, #64748b)',
+    svg: {
+      width: '18px',   // 👈 Tamaño compacto
+      height: '18px',
+    },
+    '&:hover': {
+      color: 'var(--ink, #0f172a)'
+    }
+  }),
+
+  // 🎯 5. Separador vertical más delgado y compacto
+  indicatorSeparator: (base) => ({
+    ...base,
+    backgroundColor: 'var(--line, #64748b)',
+    marginTop: '0',
+    marginBottom: '0',
+    marginLeft: '2px',
+    marginRight: '2px'
+  }),
+
+  // 🎯 6. Flechita de despliegue compacta (Dropdown Indicator)
+  dropdownIndicator: (base) => ({
+    ...base,
+    padding: '1px 3px', // 👈 Espaciado reducido
+    cursor: 'pointer',
+    color: 'var(--muted, #64748b)',
+    svg: {
+      width: '18px',   // 👈 Tamaño compacto
+      height: '18px',
+    },
+    '&:hover': {
+      color: 'var(--ink, #0f172a)'
+    }
+  }),
+
+  // 7. El contenedor del buscador/input
+  input: (base) => ({
+    ...base,
+    margin: 0,
+    paddingBottom: '2px',
+    paddingTop: '2px',
+    color: 'var(--ink, #0f172a)'
+  }),
+
+  // 8. El texto de ayuda ("Buscar...")
+  placeholder: (base) => ({
+    ...base,
+    margin: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    position: 'absolute',
+    top: '12px', // 👈 Ajustado para alinearse perfecto con el padding top reducido
+    left: '6px',
+    color: 'var(--muted, #64748b)',
+    fontSize: '0.85rem'
+  }),
+
+  // 9. Estilos de los badges seleccionados
+  multiValue: (base) => ({
+    ...base,
+    backgroundColor: 'var(--panel-2, #f8fafc)',
+    border: '1px solid var(--line, #d9e2ef)',
+    borderRadius: '4px',
+    margin: '2px 1px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    maxWidth: '140px', 
+  }),
+
+  // 10. Texto dentro del badge
+  multiValueLabel: (base) => ({
+    ...base,
+    color: 'var(--ink, #0f172a)',
+    fontSize: '0.8rem',
+    padding: '2px 4px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  }),
+
+  // 11. Botón 'X' para eliminar badge individual
+  multiValueRemove: (base) => ({
+    ...base,
+    color: 'var(--muted, #64748b)',
+    flexShrink: 0,
+    cursor: 'pointer',
+    paddingLeft: '2px',
+    paddingRight: '2px',
+    ':hover': {
+      backgroundColor: 'var(--line, #cbd5e1)',
+      color: 'var(--ink, #0f172a)',
+    },
+  }),
+};
+
+const customSelectStyles = {
+  // 1. Contenedor principal del input
+  control: (base, state) => ({
+    ...base,
+    borderRadius: 'var(--radius, 0.375rem)',
+    backgroundColor: 'var(--panel, #ffffff)',
+    borderColor: state.isFocused ? 'var(--blue, #2563eb)' : 'var(--line, #d9e2ef)',
+    color: 'var(--ink, #0f172a)',
+    minHeight: '30px',
+    maxHeight: '50px',
+    overflowY: 'auto',
+    alignItems: 'flex-start',
+    boxShadow: 'none',
+    '&:hover': { 
+      borderColor: 'var(--blue, #2563eb)' 
+    }
+  }),
+
+  menu: (base) => ({
+    ...base,
+    backgroundColor: 'var(--panel, #ffffff)',
+    borderColor: 'var(--line, #d9e2ef)',
+    boxShadow: 'var(--shadow)',
+    borderRadius: 'var(--radius, 8px)',
+    zIndex: 9999
+  }),
+
+  // 2. Contenedor interno donde conviven el buscador y los badges
+  valueContainer: (base) => ({
+    ...base,
+    display: 'flex',
+    flexDirection: 'column-reverse', // Buscador arriba, badges abajo
+    alignItems: 'stretch',
+    padding: '2px 4px', // 🎯 Reducido para maximizar el área de lectura
+    gap: '4px',
+    position: 'relative'
+  }),
+
+  // 3. Contenedor de la X global y la flechita
+  indicatorsContainer: (base) => ({
+    ...base,
+    alignSelf: 'flex-start',
+    paddingTop: '15px',
+    paddingBottom: '0',
+    paddingLeft: '0',
+    paddingRight: '2px',
+    margin: '0'
+  }),
+
+  // 🎯 4. Reducción y pegado de la 'X' de limpiar todo (Clear Indicator)
+  clearIndicator: (base) => ({
+    ...base,
+    padding: '2px 3px', // 👈 Reduce el espaciado
+    cursor: 'pointer',
+    color: 'var(--muted, #64748b)',
+    svg: {
+      width: '18px',   // 👈 Tamaño compacto
+      height: '18px',
+    },
+    '&:hover': {
+      color: 'var(--ink, #0f172a)'
+    }
+  }),
+
+  // 🎯 5. Separador vertical más delgado y compacto
+  indicatorSeparator: (base) => ({
+    ...base,
+    backgroundColor: 'var(--line, #64748b)',
+    marginTop: '0',
+    marginBottom: '0',
+    marginLeft: '2px',
+    marginRight: '2px'
+  }),
+
+  // 🎯 6. Flechita de despliegue compacta (Dropdown Indicator)
+  dropdownIndicator: (base) => ({
+    ...base,
+    padding: '1px 3px', // 👈 Espaciado reducido
+    cursor: 'pointer',
+    color: 'var(--muted, #64748b)',
+    svg: {
+      width: '18px',   // 👈 Tamaño compacto
+      height: '18px',
+    },
+    '&:hover': {
+      color: 'var(--ink, #0f172a)'
+    }
+  }),
+
+  // 7. El contenedor del buscador/input
+  input: (base) => ({
+    ...base,
+    margin: 0,
+    paddingBottom: '2px',
+    paddingTop: '2px',
+    color: 'var(--ink, #0f172a)'
+  }),
+
+  // 8. El texto de ayuda ("Buscar...")
+  placeholder: (base) => ({
+    ...base,
+    margin: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    position: 'absolute',
+    top: '12px', // 👈 Ajustado para alinearse perfecto con el padding top reducido
+    left: '6px',
+    color: 'var(--muted, #64748b)',
+    fontSize: '0.85rem'
+  }),
+
+  // 9. Estilos de los badges seleccionados
+  multiValue: (base) => ({
+    ...base,
+    backgroundColor: 'var(--panel-2, #f8fafc)',
+    border: '1px solid var(--line, #d9e2ef)',
+    borderRadius: '4px',
+    margin: '2px 1px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    maxWidth: '200px', 
+  }),
+
+  // 10. Texto dentro del badge
+  multiValueLabel: (base) => ({
+    ...base,
+    color: 'var(--ink, #0f172a)',
+    fontSize: '0.8rem',
+    padding: '2px 4px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  }),
+
+  // 11. Botón 'X' para eliminar badge individual
+  multiValueRemove: (base) => ({
+    ...base,
+    color: 'var(--muted, #64748b)',
+    flexShrink: 0,
+    cursor: 'pointer',
+    paddingLeft: '2px',
+    paddingRight: '2px',
+    ':hover': {
+      backgroundColor: 'var(--line, #cbd5e1)',
+      color: 'var(--ink, #0f172a)',
+    },
+  }),
+};
+
 export default function Ventas() {
   const [filters, setFilters] = useState({
-    seller: '',
-    line: '',
-    city: '',
-    clientType: '',
+    seller: [],
+    line: [],
+    city: [],
+    clientType: [],
+    supplier: [],
     year: new Date().getFullYear().toString(),
-    month: '',
+    month: [],
     startDate: '',
     endDate: ''
   });
+    
+  const { user, setUser } = useContext(AuthContext);
   
   const [kpiData, setKpiData] = useState({
     totalSales: '$0',
     goalProgress: '0%',
     invoices: '0',
-    customers: '0'
+    customers: '0',
+    margen: '',
   });
 
   const [salesRowsCount, setSalesRowsCount] = useState(0);
   const [salesData, setSalesData] = useState([]); 
   const [rawSalesData, setRawSalesData] = useState([]);
+  const [yearBudget, setYearBudget] = useState(0);
+  const [totalBudget, setTotalBudget] = useState([]);
+  const [isHoveredUpload, setIsHoveredUpload] = useState(false);
+  const [uploadMode, setUploadMode] = useState('replace'); // 'replace' o 'append'
+  const [dragActive, setDragActive] = useState(false);
+  const inputRef = useRef(null);
+  const [selectedFile, setSelectedFile] = useState(null);
 
   // 🎯 ESTADOS PARA LA PAGINACIÓN (Evita el congelamiento del DOM)
   const [currentPage, setCurrentPage] = useState(1);
@@ -54,7 +385,82 @@ export default function Ventas() {
     cities: [],
     clientTypes: [],
     years: [],
+    months: [],
+    suppliers: [],
   });
+
+  const colors = {
+    primary: '#7c3aed', // Morado principal
+    primaryLight: '#ede9fe', // Morado muy claro para el fondo del botón
+    border: '#cbd5e1', // Gris para los bordes
+    textMuted: '#64748b' // Gris para el texto secundario
+  };
+
+  //funcion para determinar el presupuesto global
+  useEffect(()=>{
+    findBudgets()
+    .then(({data})=>{
+      setTotalBudget(data)
+      const datosFiltrados = data.filter(item => Number(item.anio) === new Date().getFullYear());
+      const suma = datosFiltrados.reduce((acumulador, item) => {
+        const montoNumerico = Number(item.monto) || 0;
+        return acumulador + montoNumerico;
+      }, 0);
+      setYearBudget(suma)
+    })
+  },[]);
+
+  const mesesConNumero = [
+    { numero: '01', nombre: "Enero", abreviatura: "Ene" },
+    { numero: '02', nombre: "Febrero", abreviatura: "Feb" },
+    { numero: '03', nombre: "Marzo", abreviatura: "Mar" },
+    { numero: '04', nombre: "Abril", abreviatura: "Abr" },
+    { numero: '05', nombre: "Mayo", abreviatura: "May" },
+    { numero: '06', nombre: "Junio", abreviatura: "Jun" },
+    { numero: '07', nombre: "Julio", abreviatura: "Jul" },
+    { numero: '08', nombre: "Agosto", abreviatura: "Ago" },
+    { numero: '09', nombre: "Septiembre", abreviatura: "Sep" },
+    { numero: '10', nombre: "Octubre", abreviatura: "Oct" },
+    { numero: '11', nombre: "Noviembre", abreviatura: "Nov" },
+    { numero: '12', nombre: "Diciembre", abreviatura: "Dic" }
+  ];
+
+  const calculateGoal = (mesesInput, year) => {
+    // 1. Normalizar 'mesesInput' a un Array de strings limpios en mayúsculas
+    let selectedMonths = [];
+
+    if (Array.isArray(mesesInput)) {
+      selectedMonths = mesesInput
+        .map(m => (m?.value || m || '').toString().trim().toUpperCase())
+        .filter(Boolean);
+    } else if (mesesInput) {
+      const cleanStr = mesesInput.toString().trim().toUpperCase();
+      if (cleanStr) selectedMonths = [cleanStr];
+    }
+
+    // 2. Filtrar presupuestos por año
+    let datosFiltrados = totalBudget.filter(
+      item => Number(item.anio) === Number(year)
+    );
+
+    // 3. Si hay meses seleccionados, filtrar adicionalmente por esos meses
+    if (selectedMonths.length > 0) {
+      datosFiltrados = datosFiltrados.filter(item => {
+        const itemMes = item.mes ? String(item.mes).trim().toUpperCase() : '';
+        return selectedMonths.includes(itemMes);
+      });
+    }
+
+    // 4. Sumar los montos
+    const suma = datosFiltrados.reduce((acumulador, item) => {
+      const montoNumerico = Number(item.monto) || 0;
+      return acumulador + montoNumerico;
+    }, 0);
+
+    // 5. Actualizar estado y retornar
+    setYearBudget(suma);
+    return suma;
+  };
 
   const parseCurrencyToNumber = (value) => {
     if (value === null || value === undefined) return 0;
@@ -75,7 +481,7 @@ export default function Ventas() {
   // Función para calcular los KPIs basados en el listado actual de datos
     const calculateKPIs = (rows) => {
     if (!rows || rows.length === 0) {
-        return { totalSales: '$0', goalProgress: '0%', invoices: '0', customers: '0' };
+        return { totalSales: '$0', goalProgress: '0%', invoices: '0', customers: '0', margen: '0%' };
     }
 
     // 1. Total Ventas: Suma de la columna 'valor'
@@ -87,16 +493,20 @@ export default function Ventas() {
     // 3. Clientes Únicos: Contamos cuántas cédulas/nit 'cliente' diferentes existen
     const uniqueCustomers = new Set(rows.map(row => row.cliente).filter(Boolean)).size;
 
-    // 4. Cumplimiento Meta: Supongamos una meta estática por ahora (ej: 500 millones)
-    // Puedes cambiar este número por el que requiera tu empresa
-    const metaEmpresa = 500000000; 
-    const porcentajeMeta = Math.min((total / metaEmpresa) * 100, 100); // Tope de 100%
+    // 4. Calcular la margen 
+    const suMargen = rows.reduce((sum, row) => sum + (parseFloat(row.margen) || 0), 0);
+    const calculateMargen = suMargen / rows.length
+
+    // 4. Cumplimiento Meta
+    const metaEmpresa = calculateGoal(filters.month, filters.year) 
+    const porcentajeMeta = (parseFloat(total) / metaEmpresa) * 100 /* Math.min((total / metaEmpresa) * 100, 100); */ // Tope de 100%
 
     return {
         totalSales: `$${Math.round(total).toLocaleString('es-CO')}`,
-        goalProgress: `${porcentajeMeta.toFixed(1)}%`,
+        goalProgress: `${porcentajeMeta.toFixed(2)}%`,
         invoices: uniqueInvoices.toLocaleString('es-CO'),
-        customers: uniqueCustomers.toLocaleString('es-CO')
+        customers: uniqueCustomers.toLocaleString('es-CO'),
+        margen: `${calculateMargen.toFixed(2)}%`,
     };
   };
 
@@ -132,89 +542,11 @@ export default function Ventas() {
   const currentRows = salesData.slice(indexOfFirstRow, indexOfLastRow);
   const totalPages = Math.ceil(salesData.length / rowsPerPage);
 
-/*   const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    Swal.fire({
-      title: 'Procesando archivo',
-      text: 'Por favor, espera mientras se lee el Excel...',
-      allowOutsideClick: false,
-      showConfirmButton: false,
-      didOpen: () => {
-        Swal.showLoading();
-      }
-    });
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const bstr = event.target.result;
-      const workbook = XLSX.read(bstr, { type: 'binary' });
-      const workSheetName = workbook.SheetNames[0];
-      const workSheet = workbook.Sheets[workSheetName];
-      const jsonRows = XLSX.utils.sheet_to_json(workSheet);
-
-      if (jsonRows.length === 0) {
-        Swal.fire({
-          icon: 'error',
-          title: 'Archivo vacío',
-          text: 'El Excel cargado no contiene registros.',
-          showConfirmButton: false,
-          timer: 5000,
-        });
-        return;
-      }
-      const columnMapping = {
-        "Lista de precios": "listaPrecios",
-        "C.O.": "co",
-        "Nombre vendedor": "vendedor",
-        "Desc. tipo de cliente": "typeClient",
-        "Cliente factura": "cliente",
-        "Razon social cliente factura": "razonSocial",
-        "Fecha": "date",
-        "Nro documento": "doc",
-        "LINEA": "linea",
-        "Referencia": "ref",
-        "Desc. item": "item",
-        "U.M.": "um",
-        "Cantidad": "cantidad",
-        "Valor bruto": "valor",
-      };
-      const transformedRows = jsonRows.map(row => {
-        const newRow = {};
-        for (const originalKey in row) {
-          const newKey = columnMapping[originalKey] || originalKey;
-          newRow[newKey] = row[originalKey];
-        }
-        return newRow;
-      });
-      setRawSalesData(transformedRows);
-      setSalesData(transformedRows);
-      setSalesRowsCount(transformedRows.length);
-      setCurrentPage(1); // Reiniciar paginación al cargar archivo nuevo
-      const uniqueSellers = [...new Set(transformedRows.map(item => item.vendedor).filter(Boolean))];
-      const uniqueLines = [...new Set(transformedRows.map(item => item.linea).filter(Boolean))];
-      const uniqueCities = [...new Set(transformedRows.map(item => item.co).filter(Boolean))];
-      const uniqueClientTypes = [...new Set(transformedRows.map(item => item.typeClient).filter(Boolean))];
-      setFilterOptions({
-        sellers: uniqueSellers,
-        lines: uniqueLines,
-        cities: uniqueCities,
-        clientTypes: uniqueClientTypes
-      });
-    // 🎯 CALCULAMOS LOS KPIS INICIALES
-    const initialKpis = calculateKPIs(transformedRows);
-    setKpiData(initialKpis);
-      setTimeout(() => {
-        Swal.close();
-      }, 800);
-    };
-    reader.readAsBinaryString(file);
-  }; */
-
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    setSelectedFile(file);
 
-    // Detectamos si es un archivo plano de texto o CSV
     const isTextFile = file.name.endsWith('.txt') || file.name.endsWith('.csv');
 
     Swal.fire({
@@ -233,12 +565,9 @@ export default function Ventas() {
       const data = event.target.result;
       let workbook;
 
-      // 🎯 CONFIGURACIÓN DINÁMICA DE LECTURA SHEETJS
       if (isTextFile) {
-        // Si es TXT o CSV, lo leemos como String y forzamos codificación UTF-8 para tildes y Ñs
         workbook = XLSX.read(data, { type: 'string', codepage: 65001 });
       } else {
-        // Si es .xlsx o .xls, sigue usando la lectura binaria habitual
         workbook = XLSX.read(data, { type: 'binary' });
       }
       
@@ -283,12 +612,11 @@ export default function Ventas() {
         for (const originalKey in row) {
           const newKey = columnMapping[originalKey] || originalKey;
           
-          // 🎯 SI ES LA COLUMNA DE VALOR BRUTO, LA LIMPIAMOS DE UNA VEZ
           if (newKey === 'valor' || newKey === 'subtotal') {
             newRow[newKey] = parseCurrencyToNumber(row[originalKey]);
-          }else if(newKey === 'date' ){
+          } else if (newKey === 'date') {
             newRow[newKey] = parseExcelDate(row[originalKey]);
-          }else if(newKey === 'co'){
+          } else if (newKey === 'co') {
             const originalValue = row[originalKey];
             newRow[newKey] = originalValue !== undefined && originalValue !== null
               ? String(originalValue).trim().padStart(3, '0')
@@ -300,34 +628,88 @@ export default function Ventas() {
         return newRow;
       });
 
+      // 🎯 1. VENDEDORES A EXCLUIR EN LA VISTA INICIAL
+      const excludedSellers = [
+        'CEBALLOS ARISTIZABAL IVAN ORLANDO',
+        'CEBALLOS DE BRAVO BERTHA LUCIA'
+      ];
+
       setRawSalesData(transformedRows);
-      setSalesData(transformedRows);
-      setSalesRowsCount(transformedRows.length);
+
+      // 🎯 2. FILTRAR REGISTROS INICIALES SIN DICHOS VENDEDORES
+      const initialFilteredRows = transformedRows.filter(
+        item => !excludedSellers.includes(item.vendedor)
+      );
+
+      setSalesData(initialFilteredRows);
+      setSalesRowsCount(initialFilteredRows.length);
       setCurrentPage(1); 
 
-      const uniqueSellers = [...new Set(transformedRows.map(item => item.vendedor).filter(Boolean))];
+      // Obtener todos los vendedores para las opciones desplegables
+      const allUniqueSellers = [...new Set(transformedRows.map(item => item.vendedor).filter(Boolean))];
+      
+      // Lista inicial preseleccionada sin los excluidos
+      const defaultSelectedSellers = allUniqueSellers.filter(
+        seller => !excludedSellers.includes(seller)
+      );
+
       const uniqueLines = [...new Set(transformedRows.map(item => item.linea).filter(Boolean))];
       const uniqueCities = [...new Set(transformedRows.map(item => item.co).filter(Boolean))];
       const uniqueClientTypes = [...new Set(transformedRows.map(item => item.typeClient).filter(Boolean))];
+      const uniqueSupplier = [...new Set(transformedRows.map(item => item.proveedor).filter(Boolean))];
+      
       const uniqueYears = [...new Set(transformedRows.map(item => {
         if (!item.date) return null;
         const parts = item.date.split('/');
         return parts.length === 3 ? parts[2] : null;
       }).filter(Boolean))].sort((a, b) => b - a);
       
+      const uniqueMonth = mesesConNumero.map(m => m.nombre)/* [...new Set(transformedRows.map(item => {
+        if (!item.date) return null;
+        const parts = item.date.split('/');
+        const mes = parts.length === 3 ? parts[1].padStart(2, '0') : null;
+        if (mes) {
+          const look = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === mes);
+          return look ? look.nombre : null;
+        }
+        return null;
+      }).filter(Boolean))]; */
+
+      // Opciones del selector (incluye a todos los vendedores)
       setFilterOptions({
-        sellers: uniqueSellers,
+        sellers: allUniqueSellers,
         lines: uniqueLines,
         cities: uniqueCities,
         clientTypes: uniqueClientTypes,
         years: uniqueYears,
+        months: uniqueMonth,
+        suppliers: uniqueSupplier,
       });
 
-      if (uniqueYears.length > 0 && !uniqueYears.includes(filters.year)) {
-        setFilters(prev => ({ ...prev, year: uniqueYears[0] }));
-      }
+      // 🎯 3. DETECTAR AÑO Y MES ACTUAL
+      const today = new Date();
+      const currentYearStr = String(today.getFullYear());
+      const currentMonthNumStr = String(today.getMonth() + 1).padStart(2, '0');
+      
+      const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === currentMonthNumStr);
+      const currentMonthName = currentMonthObj ? currentMonthObj.nombre : null;
 
-      const initialKpis = calculateKPIs(transformedRows);
+      // Determinar año y mes por defecto
+      const defaultYear = uniqueYears.includes(currentYearStr) ? currentYearStr : (uniqueYears[0] || '');
+      const defaultMonthName = (currentMonthName && uniqueMonth.includes(currentMonthName))
+        ? currentMonthName
+        : (uniqueMonth[0] || '');
+
+      // 🎯 4. ACTUALIZAR ESTADO DE FILTROS ACTIVO
+      setFilters(prev => ({
+        ...prev,
+        seller: defaultSelectedSellers,
+        year: defaultYear || prev.year,
+        month: defaultMonthName ? [defaultMonthName] : prev.month // Pasa como Array para tu Select multiselect
+      }));
+
+      // Calculamos KPIs iniciales sobre la data limpia inicial
+      const initialKpis = calculateKPIs(initialFilteredRows);
       setKpiData(initialKpis);
 
       setTimeout(() => {
@@ -335,11 +717,10 @@ export default function Ventas() {
       }, 800); 
     };
 
-    // 🎯 ACTIVACIÓN DEL LECTOR SEGÚN EL TIPO DE ARCHIVO
     if (isTextFile) {
-      reader.readAsText(file, 'UTF-8'); // Abre los archivos planos como texto legible
+      reader.readAsText(file, 'UTF-8');
     } else {
-      reader.readAsBinaryString(file); // Abre los archivos binarios de Excel
+      reader.readAsBinaryString(file);
     }
   };
 
@@ -356,25 +737,36 @@ export default function Ventas() {
     }
 
     // 2. FILTRO DE MES
-    if (filters.month) {
+    if (filters.month && filters.month.length > 0) {
       filtered = filtered.filter(row => {
         if (!row.date) return false;
         const parts = row.date.split('/');
-        return parts.length === 3 && parts[1] === filters.month;
+        
+        if (parts.length !== 3) return false;
+
+        const numMes = parts[1]; // Ej: "01", "02", etc.
+
+        // 1. Buscamos el nombre del mes correspondiente en tu array auxiliar
+        const monthObj = mesesConNumero.find(m => m.numero === numMes);
+        if (!monthObj) return false;
+
+        // 2. Si el multiselect guarda objetos { value: 'Enero', label: 'Enero' } o strings 'Enero':
+        // extraemos el valor puro para asegurarnos
+        const selectedMonthNames = filters.month.map(m => m.value || m);
+
+        // 3. Verificamos si el nombre del mes de la fila está en los seleccionados
+        return selectedMonthNames.includes(monthObj.nombre);
       });
     }
 
-    // 🎯 3. NUEVO: FILTRO POR RANGO DE FECHAS (startDate y endDate)
+    // 3. FILTRO POR RANGO DE FECHAS (startDate y endDate)
     if (filters.startDate || filters.endDate) {
       filtered = filtered.filter(row => {
         if (!row.date) return false;
-
-        // Convertimos la fecha de la fila "DD/MM/YYYY" a un objeto Date real
         const parts = row.date.split('/');
         if (parts.length !== 3) return false;
         const rowDate = new Date(parts[2], parts[1] - 1, parts[0]);
 
-        // Validamos los límites si existen
         if (filters.startDate) {
           const start = new Date(filters.startDate + 'T00:00:00');
           if (rowDate < start) return false;
@@ -388,20 +780,29 @@ export default function Ventas() {
       });
     }
 
-    // 4. Resto de filtros (Vendedor, Línea, Ciudad...)
-    if (filters.seller) {
-      filtered = filtered.filter(row => row.vendedor === filters.seller);
-    }
-    if (filters.line) {
-      filtered = filtered.filter(row => row.linea === filters.line);
-    }
-    if (filters.city) {
-      filtered = filtered.filter(row => row.co === filters.city);
-    }
-    if (filters.clientType) {
-      filtered = filtered.filter(row => row.typeClient === filters.clientType);
+    // 🎯 4. FILTROS MÚLTIPLES (Usando .includes)
+
+    // Vendedor múltiple
+    if (filters.seller && filters.seller.length > 0) {
+      filtered = filtered.filter(row => filters.seller.includes(row.vendedor));
     }
 
+    // Línea múltiple
+    if (filters.line && filters.line.length > 0) {
+      filtered = filtered.filter(row => filters.line.includes(row.linea));
+    }
+
+    // Agencia (Ciudad) múltiple
+    if (filters.city && filters.city.length > 0) {
+      filtered = filtered.filter(row => filters.city.includes(row.co));
+    }
+
+    // Tipo de cliente múltiple
+    if (filters.clientType && filters.clientType.length > 0) {
+      filtered = filtered.filter(row => filters.clientType.includes(row.typeClient));
+    }
+
+    // Actualización de estado
     setSalesData(filtered);
     setSalesRowsCount(filtered.length);
     setCurrentPage(1);
@@ -410,27 +811,6 @@ export default function Ventas() {
     setKpiData(filteredKpis);
 
   }, [filters, rawSalesData]);
-
-  /* useEffect(() => {
-    let filtered = [...rawSalesData];
-
-    if (filters.seller) {
-      filtered = filtered.filter(row => row.vendedor === filters.seller); // 👈 Corregido 'vendedor' en minúscula
-    }
-    if (filters.line) {
-      filtered = filtered.filter(row => row.linea === filters.line);
-    }
-    if (filters.city) {
-      filtered = filtered.filter(row => row.co === filters.city);
-    }
-    if (filters.clientType) {
-      filtered = filtered.filter(row => row.typeClient === filters.clientType);
-    }
-
-    setSalesData(filtered);
-    setSalesRowsCount(filtered.length);
-    setCurrentPage(1); // 👈 Al aplicar un filtro, volvemos automáticamente a la página 1
-  }, [filters, rawSalesData]); */
 
   const exportToExcel = () => {
     console.log("Exportando a Excel...");
@@ -461,7 +841,7 @@ export default function Ventas() {
         'M ($)': Math.round(total / 1000000) // Ej: 15,000,000 -> 15
         }))
         .sort((a, b) => b.Ventas - a.Ventas) // Ordenar de mayor a menor
-        .slice(0, 5); // 🏆 Nos quedamos solo con el Top 5 mejores
+        .slice(0, 10); // 🏆 Nos quedamos solo con el Top 5 mejores
   };
 
   /* Funcion para optener el ranking por proveedor */
@@ -485,7 +865,7 @@ export default function Ventas() {
         'M ($)': Math.round(total / 1000000) // Ej: 15,000,000 -> 15
         }))
         .sort((a, b) => b.Ventas - a.Ventas) // Ordenar de mayor a menor
-        .slice(0, 8); // 🏆 Nos quedamos solo con el Top 5 mejores
+        .slice(0, 10); // 🏆 Nos quedamos solo con el Top 5 mejores
   };
 
   //funcion para hallar la comparativa por mes
@@ -537,67 +917,519 @@ export default function Ventas() {
         .sort((a, b) => b.value - a.value);
   };
 
+  //logica para saber si es celular
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 900); // Establecer a true si la ventana es menor o igual a 768px
+    };
+  
+    // Llama a handleResize al cargar y al cambiar el tamaño de la ventana
+    window.addEventListener('resize', handleResize);
+    handleResize(); // Llama a handleResize inicialmente para establecer el estado correcto
+  
+    // Elimina el event listener cuando el componente se desmonta
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  //funcion para comparar ventas por mes vs presupuesto
+  const getCompareData = (salesRows, budgetRows, selectedYear) => {
+    // Nombres cortos para las etiquetas del gráfico/tabla
+    const nombresMesesCortos = [
+      "Ene", "Feb", "Mar", "Abr", "May", "Jun", 
+      "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"
+    ];
+
+    // Nombres completos en MAYÚSCULAS para emparejar con item.mes del presupuesto
+    const nombresMesesLargos = [
+      "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+      "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+    ];
+
+    const salesByMonth = {};
+    const budgetByMonth = {};
+
+    // 1. Procesar Ventas (Acumula por índice 0-11)
+    if (salesRows && salesRows.length > 0) {
+      salesRows.forEach(row => {
+        if (!row.date) return;
+        const parts = row.date.split('/');
+        if (parts.length === 3) {
+          const rowYear = parts[2];
+          if (String(rowYear) === String(selectedYear)) {
+            const rowMonth = parseInt(parts[1], 10) - 1; // Base 0 (0-11)
+            const val = Number(row.valor) || 0;
+            salesByMonth[rowMonth] = (salesByMonth[rowMonth] || 0) + val;
+          }
+        }
+      });
+    }
+
+    // 2. Procesar Presupuestos (Acumula por Nombre en Mayúsculas: "ENERO", "FEBRERO"...)
+    if (budgetRows && budgetRows.length > 0) {
+      budgetRows.forEach(item => {
+        if (String(item.anio) === String(selectedYear)) {
+          const monthName = item.mes ? item.mes.trim().toUpperCase() : null;
+          const monto = Number(item.monto) || 0;
+
+          if (monthName) {
+            budgetByMonth[monthName] = (budgetByMonth[monthName] || 0) + monto;
+          }
+        }
+      });
+    }
+
+    // 3. Unificar ambos flujos cruzando el índice con el Nombre del Mes
+    return nombresMesesCortos.map((shortName, index) => {
+      const fullName = nombresMesesLargos[index]; // Obtenemos "ENERO" para index 0, "FEBRERO" para index 1, etc.
+
+      return {
+        name: shortName,
+        Ventas: Math.round(salesByMonth[index] || 0),
+        Presupuesto: Math.round(budgetByMonth[fullName] || 0) // 👈 Leemos budgetByMonth por su clave textual
+      };
+    });
+  };
+
+  const convertMonth = (selectedMonthStr) => {
+    const nombresMeses = [
+      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    ];
+    const targetMonthNum = parseInt(selectedMonthStr, 10);
+    const selectedMonthName = nombresMeses[targetMonthNum - 1];
+    return selectedMonthName
+  }
+
+  const compareCoVsBudget = (salesRows, budgetRows, selectedYear, selectedMonthFilter) => {
+    // Lista de Centros de Operación
+    const nombresCo = ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "020", "100"];
+
+    // Nombres de meses tal como vienen en el JSON de presupuestos (MAYÚSCULAS)
+    const nombresMesesLargos = [
+      "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+      "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+    ];
+
+    const salesByCo = {};
+    const budgetByCo = {};
+
+    // --- 1. RESOLVER EL MES Y NÚMERO DE MES SELECCIONADO ---
+    // Extraemos el valor si viene como objeto { value, label }
+    const rawMonthVal = selectedMonthFilter?.value || selectedMonthFilter;
+    
+    let targetMonthNum = null;  // Para ventas (1 - 12)
+    let targetMonthName = null; // Para presupuestos ("ENERO", "FEBRERO"...)
+
+    if (rawMonthVal) {
+      const rawStr = String(rawMonthVal).trim().toUpperCase();
+      const parsedNum = parseInt(rawStr, 10);
+
+      // Si viene como número o string numérico (ej: "01", "1", 1)
+      if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+        targetMonthNum = parsedNum;
+        targetMonthName = nombresMesesLargos[parsedNum - 1];
+      } else {
+        // Si viene como texto de mes (ej: "ENERO", "Enero", "Ene")
+        const foundIdx = nombresMesesLargos.findIndex(m => m.startsWith(rawStr) || rawStr.startsWith(m));
+        if (foundIdx !== -1) {
+          targetMonthNum = foundIdx + 1;
+          targetMonthName = nombresMesesLargos[foundIdx];
+        }
+      }
+    }
+
+    // Helper para asegurar formato de 3 dígitos (ej: 1 -> "001")
+    const formatCo = (coValue) => {
+      if (!coValue) return "";
+      const clean = String(coValue).trim();
+      return clean.padStart(3, '0');
+    };
+
+    // --- 2. PROCESAR VENTAS (Filtrando por Año y Mes Núm) ---
+    if (salesRows && salesRows.length > 0 && targetMonthNum) {
+      salesRows.forEach(row => {
+        if (!row.date) return;
+        const parts = row.date.split('/');
+        if (parts.length === 3) {
+          const rowMonth = parseInt(parts[1], 10);
+          const rowYear = parts[2];
+
+          if (String(rowYear) === String(selectedYear) && rowMonth === targetMonthNum) {
+            const coKey = formatCo(row.co || row.CO);
+            if (coKey) {
+              const val = Number(row.valor) || 0;
+              salesByCo[coKey] = (salesByCo[coKey] || 0) + val;
+            }
+          }
+        }
+      });
+    }
+
+    // --- 3. PROCESAR PRESUPUESTOS (Filtrando por Año y Mes Nombre) ---
+    if (budgetRows && budgetRows.length > 0 && targetMonthName) {
+      budgetRows.forEach(item => {
+        const itemAnio = String(item.anio);
+        const itemMes = item.mes ? item.mes.trim().toUpperCase() : "";
+
+        if (itemAnio === String(selectedYear) && itemMes === targetMonthName) {
+          const coKey = formatCo(item.co);
+          if (coKey) {
+            const monto = Number(item.monto) || 0;
+            budgetByCo[coKey] = (budgetByCo[coKey] || 0) + monto;
+          }
+        }
+      });
+    }
+
+    // --- 4. UNIFICAR RESULTADOS CON LA LISTA MAESTRA DE COs ---
+    return nombresCo.map(co => ({
+      name: `${co}`,
+      Ventas: Math.round(salesByCo[co] || 0),
+      Presupuesto: Math.round(budgetByCo[co] || 0)
+    }));
+  };
+
+  // Memorizamos los datos combinados para rendimiento
+  const chartData = useMemo(() => {
+    if (filters.month && filters.month.length === 1) {
+      return compareCoVsBudget(salesData, totalBudget, filters.year, filters.month[0]);
+    } else if(filters.month && filters.month.length === 0 || filters.month && filters.month.length > 1){
+      return getCompareData(salesData, totalBudget, filters.year);
+    }
+  }, [salesData, totalBudget, filters.year, filters.month]);
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setSelectedFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  // Simular clic en el input oculto al hacer clic en la caja
+  const onButtonClick = () => {
+    inputRef.current.click();
+  };
+
+  const RenderPercentage = ({ x, y, width, height, value }) => (
+    <text
+        x={x + width + 5}
+        y={y + height / 2 + 4}
+        fill="#6c757d"
+        fontSize={11}
+        fontWeight="bold"
+    >
+        {value}%
+    </text>
+);
+
   return (
     <div className="container-fluid p-2 stack gap-4 w-100">
       
+      {/* subir archivo */}
+      {user.role === 'admin' &&
+        /* sesion para subir documentos */
+        <div className="panel shadow-sm rounded-4 p-3 w-100 ">
+          <div className="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center mb-4 gap-2 w-100">
+            <h5 className="fw-bold mb-0 d-flex align-items-center" style={{ fontSize: '1.1rem' }}>
+              <FaFileExcel className="me-2" style={{ color: colors.primary }} />
+              Cargar archivo de ventas
+            </h5>
+          </div>
+
+          {/* Zona de Drag & Drop */}
+          <div 
+            className="text-center rounded-3 d-flex flex-column align-items-center justify-content-center w-100"
+            style={{
+              border: `2px dashed ${dragActive ? colors.primary : colors.border}`,
+              padding: '10px 10px',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            /* onDrop={handleDrop} */
+            onClick={onButtonClick}
+          >
+            <BsCloudUploadFill size={40} style={{ color: colors.primary, marginBottom: '15px' }} />
+            
+            <h6 className="fw-semibold mb-2">
+              {selectedFile ? `Archivo seleccionado: ${selectedFile.name}` : "Arrastra tu archivo Excel aquí o haz clic para seleccionar"}
+            </h6>
+
+            {/* Input oculto real */}
+            <input
+              ref={inputRef}
+              className="form-sm" 
+              type="file"
+              accept=".xlsx,.xls,.txt,.csv"
+              onChange={(e) => handleFileChange(e)}
+              style={{ display: "none" }}
+            />
+          </div>
+
+          {/* Botones de Acción */}
+          {/* <div className="d-flex flex-column flex-md-row justify-content-end align-items-md-center gap-3">
+            <button 
+              onMouseEnter={() => setIsHoveredUpload(true)}
+              onMouseLeave={() => setIsHoveredUpload(false)}
+              className="btn fw-semibold"
+              style={{
+                color: isHoveredUpload ? '#ffffff' : '#475569',
+                backgroundColor: isHoveredUpload ? '#9fa8da' : 'transparent',
+                borderColor: '#9fa8da',
+                borderRadius: '8px',
+                transition: 'all 0.2s ease', // Suaviza la transición al pasar el cursor
+                fontSize: '0.9rem'
+              }}
+              onClick={(e)=>handleuploadInfo(e)}
+            >
+              <FiUpload className="me-2" size={18} /> Subir ventas
+            </button>
+          </div> */}
+
+        </div>
+
+      }
+
       {/* TOOLBAR DE FILTROS */}
-      <div className="toolbar p-2 rounded shadow-sm row g-2 align-items-end mb-4">
+      <div className="toolbar p-2 rounded shadow-sm row align-items-end mb-4 gap-0">
+        {/* Filtro por vendedor */}
         <div className="col-12 col-sm-6 col-md-3">
-          <label className="form-label fw-semibold small mb-1">Archivo Excel</label>
-          <input 
-            type="file" 
-            className="form-sm" 
-            accept=".xlsx,.xls,.txt,.csv"
-            onChange={handleFileChange}
+          <label className="form-label fw-semibold small mb-1">Vendedor</label>
+          <Select
+            isMulti
+            // 1. Agregamos la opción de seleccionar todos al inicio
+            options={[
+              { value: '*', label: '--- Seleccionar Todos ---' },
+              ...filterOptions.sellers.map(s => ({ value: s, label: s }))
+            ]}
+            value={filters.seller.map(s => ({ value: s, label: s }))}
+            onChange={(selectedOptions) => {
+              // Manejo cuando se limpia el campo completamente
+              if (!selectedOptions || selectedOptions.length === 0) {
+                setFilters({ ...filters, seller: [] });
+                return;
+              }
+
+              // 2. Evaluamos si el usuario seleccionó "Seleccionar Todos"
+              const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
+
+              if (hasSelectAll) {
+                // Alternar: si ya estaban todos marcados, vaciamos; si no, seleccionamos todos los vendedores
+                if (filters.seller.length === filterOptions.sellers.length) {
+                  setFilters({ ...filters, seller: [] });
+                } else {
+                  setFilters({
+                    ...filters,
+                    seller: filterOptions.sellers
+                  });
+                }
+              } else {
+                // Selección individual
+                setFilters({
+                  ...filters,
+                  seller: selectedOptions.map(opt => opt.value)
+                });
+              }
+            }}
+            placeholder="Buscar..."
+            styles={customSelectStyles}
+          />
+        </div>
+
+        {/* Filtro por linea */}
+        <div className="col-12 col-sm-6 col-md-3">
+          <label className="form-label fw-semibold small mb-1">Línea</label>
+          <Select
+            isMulti
+            // 1. Inyectamos la opción de seleccionar todos al inicio
+            options={[
+              { value: '*', label: '--- Seleccionar Todos ---' },
+              ...filterOptions.lines.map(l => ({ value: l, label: l }))
+            ]}
+            value={filters.line.map(l => ({ value: l, label: l }))}
+            onChange={(selectedOptions) => {
+              // Manejo si se limpia la selección
+              if (!selectedOptions || selectedOptions.length === 0) {
+                setFilters({ ...filters, line: [] });
+                return;
+              }
+
+              // 2. Evaluamos si se seleccionó "Seleccionar Todos"
+              const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
+
+              if (hasSelectAll) {
+                // Alternar: si ya estaban todas las líneas marcadas, vaciamos; si no, seleccionamos todas
+                if (filters.line.length === filterOptions.lines.length) {
+                  setFilters({ ...filters, line: [] });
+                } else {
+                  setFilters({
+                    ...filters,
+                    line: filterOptions.lines
+                  });
+                }
+              } else {
+                // Selección individual
+                setFilters({
+                  ...filters,
+                  line: selectedOptions.map(opt => opt.value)
+                });
+              }
+            }}
+            placeholder="Buscar..."
+            styles={customSelectStyles}
+          />
+        </div>
+
+        {/* filtro por co */}
+        <div className="col-12 col-sm-6 col-md-3">
+          <label className="form-label fw-semibold small mb-1">C.O.</label>
+          <Select
+            isMulti
+            // 1. Agregamos la opción de seleccionar todos al inicio
+            options={[
+              { value: '*', label: '--- Seleccionar Todos ---' },
+              ...filterOptions.cities.map(c => ({ value: c, label: c }))
+            ]}
+            value={filters.city.map(c => ({ value: c, label: c }))}
+            onChange={(selectedOptions) => {
+              // Si se limpia el select completamente
+              if (!selectedOptions || selectedOptions.length === 0) {
+                setFilters({ ...filters, city: [] });
+                return;
+              }
+
+              // 2. Evaluamos si el usuario seleccionó "Seleccionar Todos"
+              const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
+
+              if (hasSelectAll) {
+                // Alternar: si ya estaban todos marcados, vaciamos; si no, marcamos todas las ciudades
+                if (filters.city.length === filterOptions.cities.length) {
+                  setFilters({ ...filters, city: [] });
+                } else {
+                  setFilters({
+                    ...filters,
+                    city: filterOptions.cities
+                  });
+                }
+              } else {
+                // Selección manual de items
+                setFilters({
+                  ...filters,
+                  city: selectedOptions.map(opt => opt.value)
+                });
+              }
+            }}
+            placeholder="Buscar..."
+            styles={customSelectStyles}
           />
         </div>
         
-        <div className="col-12 col-sm-6 col-md-2">
-          <label className="form-label fw-semibold small mb-1">Vendedor</label>
-          <select 
-            className=""
-            value={filters.seller}
-            onChange={e => setFilters({...filters, seller: e.target.value})}
-          >
-            <option value="">Todos</option>
-            {filterOptions.sellers.map((s, idx) => <option key={idx} value={s}>{s}</option>)}
-          </select>
-        </div>
-
-        <div className="col-12 col-sm-6 col-md-2">
-          <label className="form-label fw-semibold small mb-1">Línea</label>
-          <select 
-            className=""
-            value={filters.line}
-            onChange={e => setFilters({...filters, line: e.target.value})}
-          >
-            <option value="">Todas</option>
-            {filterOptions.lines.map((l, idx) => <option key={idx} value={l}>{l}</option>)}
-          </select>
-        </div>
-
-        <div className="col-12 col-sm-6 col-md-2">
-          <label className="form-label fw-semibold small mb-1">Agencia</label>
-          <select 
-            className=""
-            value={filters.city}
-            onChange={e => setFilters({...filters, city: e.target.value})}
-          >
-            <option value="">Todas</option>
-            {filterOptions.cities.map((c, idx) => <option key={idx} value={c}>{c}</option>)}
-          </select>
-        </div>
-
-        <div className="col-12 col-sm-6 col-md-2">
+        {/* filtro por tipo de cliente */}
+        <div className="col-12 col-sm-6 col-md-3">
           <label className="form-label fw-semibold small mb-1">Tipo cliente</label>
-          <select 
-            className=""
-            value={filters.clientType}
-            onChange={e => setFilters({...filters, clientType: e.target.value})}
-          >
-            <option value="">Todos</option>
-            {filterOptions.clientTypes.map((t, idx) => <option key={idx} value={t}>{t}</option>)}
-          </select>
+          <Select
+            isMulti
+            // 1. Inyectamos la opción de seleccionar todos
+            options={[
+              { value: '*', label: '--- Seleccionar Todos ---' },
+              ...filterOptions.clientTypes.map(t => ({ value: t, label: t }))
+            ]}
+            value={filters.clientType.map(t => ({ value: t, label: t }))}
+            onChange={(selectedOptions) => {
+              // Manejo si se limpia la selección
+              if (!selectedOptions || selectedOptions.length === 0) {
+                setFilters({ ...filters, clientType: [] });
+                return;
+              }
+
+              // 2. Verificamos si se seleccionó la opción "Seleccionar Todos"
+              const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
+
+              if (hasSelectAll) {
+                // Si ya estaban todos seleccionados y vuelve a pulsar "Todos", limpia la selección
+                if (filters.clientType.length === filterOptions.clientTypes.length) {
+                  setFilters({ ...filters, clientType: [] });
+                } else {
+                  // Si no, selecciona todos los tipos de cliente disponibles
+                  setFilters({
+                    ...filters,
+                    clientType: filterOptions.clientTypes
+                  });
+                }
+              } else {
+                // Selección individual
+                setFilters({
+                  ...filters,
+                  clientType: selectedOptions.map(opt => opt.value)
+                });
+              }
+            }}
+            placeholder="Buscar..."
+            styles={customSelectStyles}
+          />
+        </div>
+        
+        {/* filtro por proveedor */}
+        <div className="col-12 col-sm-6 col-md-3 mt-1">
+          <label className="form-label fw-semibold small mb-1">Proveedor</label>
+          <Select
+            isMulti
+            // 1. Agregamos la opción "Seleccionar Todos" al inicio del array de opciones
+            options={[
+              { value: '*', label: '--- Seleccionar Todos ---' },
+              ...filterOptions.suppliers.map(t => ({ value: t, label: t }))
+            ]}
+            value={filters.supplier.map(t => ({ value: t, label: t }))}
+            onChange={(selectedOptions, actionMeta) => {
+              // Manejo cuando no hay nada seleccionado o se limpian los datos
+              if (!selectedOptions || selectedOptions.length === 0) {
+                setFilters({ ...filters, supplier: [] });
+                return;
+              }
+
+              // 2. Comprobamos si el usuario hizo clic en "Seleccionar Todos"
+              const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
+
+              if (hasSelectAll) {
+                // Si ya están todos seleccionados y el usuario hace clic en desmarcar uno, o si seleccionó "Todos"
+                if (filters.supplier.length === filterOptions.suppliers.length) {
+                  // Si ya estaban todos y tocó algo, o volvió a pulsar seleccionar todos: vaciamos la selección
+                  setFilters({ ...filters, supplier: [] });
+                } else {
+                  // Si no estaban todos seleccionados, marcamos todos los proveedores disponibles
+                  setFilters({
+                    ...filters,
+                    supplier: filterOptions.suppliers
+                  });
+                }
+              } else {
+                // Selección normal de opciones individuales
+                setFilters({
+                  ...filters,
+                  supplier: selectedOptions.map(opt => opt.value)
+                });
+              }
+            }}
+            placeholder="Buscar..."
+            styles={customSelectStyles}
+          />
         </div>
 
         {/* Filtro por fecha */}
@@ -605,8 +1437,8 @@ export default function Ventas() {
           <label className="form-label fw-semibold text-secondary small mb-1">Desde</label>
           <input 
             type="date" 
-            className="form-control"
             value={filters.startDate}
+            style={{height: 55}}
             onChange={e => setFilters({...filters, startDate: e.target.value, month: ''})}
           />
         </div>
@@ -614,8 +1446,8 @@ export default function Ventas() {
           <label className="form-label fw-semibold text-secondary small mb-1">Hasta</label>
           <input 
             type="date" 
-            className="form-control"
             value={filters.endDate}
+            style={{height: 55}}
             disabled={filters.startDate ? false : true}
             onChange={e => setFilters({...filters, endDate: e.target.value})}
           />
@@ -623,34 +1455,54 @@ export default function Ventas() {
 
         {/* filtro por mes */}
         <div className="col-12 col-sm-6 col-md-2">
-          <label className="form-label fw-semibold text-secondary small mb-1">Mes</label>
-          <select 
-            className="form-select"
-            value={filters.month}
-            onChange={e => setFilters({...filters, month: e.target.value, startDate: '', endDate: ''})}
-          >
-            <option value="">Todos los meses</option>
-            <option value="01">Enero</option>
-            <option value="02">Febrero</option>
-            <option value="03">Marzo</option>
-            <option value="04">Abril</option>
-            <option value="05">Mayo</option>
-            <option value="06">Junio</option>
-            <option value="07">Julio</option>
-            <option value="08">Agosto</option>
-            <option value="09">Septiembre</option>
-            <option value="10">Octubre</option>
-            <option value="11">Noviembre</option>
-            <option value="12">Diciembre</option>
-          </select>
+          <label className="form-label fw-semibold small mb-1">Mes</label>
+          <Select
+            isMulti
+            // 1. Agregamos la opción de seleccionar todos al inicio
+            options={[
+              { value: '*', label: '--- Seleccionar Todos ---' },
+              ...filterOptions.months.map(c => ({ value: c, label: c }))
+            ]}
+            value={filters.month.map(c => ({ value: c, label: c }))}
+            onChange={(selectedOptions) => {
+              // Manejo cuando se limpia la selección completamente
+              if (!selectedOptions || selectedOptions.length === 0) {
+                setFilters({ ...filters, month: [] });
+                return;
+              }
+
+              // 2. Evaluamos si el usuario seleccionó "Seleccionar Todos"
+              const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
+
+              if (hasSelectAll) {
+                // Alternar: si ya estaban todos los meses seleccionados, vaciamos; si no, marcamos todos los meses disponibles
+                if (filters.month.length === filterOptions.months.length) {
+                  setFilters({ ...filters, month: [] });
+                } else {
+                  setFilters({
+                    ...filters,
+                    month: filterOptions.months
+                  });
+                }
+              } else {
+                // Selección individual
+                setFilters({
+                  ...filters,
+                  month: selectedOptions.map(opt => opt.value)
+                });
+              }
+            }}
+            placeholder="Buscar..."
+            styles={customSelectStyles2}
+          />
         </div>
 
         {/* filtro por año */}
         <div className="col-12 col-sm-6 col-md-1">
           <label className="form-label fw-semibold text-secondary small mb-1">Año</label>
           <select 
-            className="form-select"
             value={filters.year}
+            style={{height: 55}}
             onChange={e => setFilters({...filters, year: e.target.value, startDate: '', endDate: ''})}
           >
             {filterOptions.years.map((y, idx) => <option key={idx} value={y}>{y}</option>)}
@@ -672,204 +1524,696 @@ export default function Ventas() {
       <div id="salesExportArea" className="stack gap-4">
         {/* ÁREA DE EXPORTACIÓN (KPIs y Gráficos) */}
         <div className="row g-3 mb-4">
-            <div className="col-12 col-sm-6 col-lg-3">
+          <div className="col-12 col-sm-6 col-lg-3">
             <KpiCard title="Total ventas" value={kpiData.totalSales} subtitle="Valor bruto" />
-            </div>
-            <div className="col-12 col-sm-6 col-lg-3">
+          </div>
+          <div className="col-12 col-sm-6 col-lg-3">
             <KpiCard title="Cumplimiento meta" value={kpiData.goalProgress} subtitle="Ventas / Meta" />
-            </div>
-            <div className="col-12 col-sm-6 col-lg-3">
+          </div>
+          <div className="col-12 col-sm-6 col-lg-3">
             <KpiCard title="Facturas" value={kpiData.invoices} subtitle="Documentos únicos" />
-            </div>
-            <div className="col-12 col-sm-6 col-lg-3">
+          </div>
+          {/* <div className="col-12 col-sm-6 col-lg-3">
             <KpiCard title="Clientes" value={kpiData.customers} subtitle="Clientes únicos" />
-            </div>
+          </div> */}
+          <div className="col-12 col-sm-6 col-lg-3">
+            <KpiCardMargen title="Margen" value={kpiData.margen} subtitle="Margen bruto" />
+          </div>
         </div>
 
         {/* Desde aqui comienzan los graficos */}
         <div className="row row-cols-1 row-cols-md-2 g-4 mb-4">
         {/* Grafico comparativo por mes */}
-          <div className="col">
-            <div className="panel rounded shadow-sm p-3">
+          {(filters.month.length === 0 ||  filters.month.length > 1) &&
+            <div className="col">
+              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
                 <h5 className="small fw-bold mb-3">Comparativa Mensual de Ventas</h5>
-                <div style={{ width: '100%', height: '250px' }}>
-                {salesData.length === 0 ? (
+                <div style={{ width: '100%', height: '280px' }}>
+                  {salesData.length === 0 ? (
                     <div className="h-100 d-flex align-items-center justify-content-center rounded small">
-                        Sin datos - Cargue un archivo
+                      Sin datos - Cargue un archivo
                     </div>
-                ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                        data={getMonthCompareData(salesData)}
-                        margin={{ top: 10, right: 30, left: 20, bottom: 0 }}
-                    >
-                        {/* Definición del gradiente para el fondo del gráfico */}
-                        <defs>
-                        <linearGradient id="colorVentas" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#4e73df" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#4e73df" stopOpacity={0}/>
-                        </linearGradient>
-                        </defs>
-                        
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                        <XAxis dataKey="name" stroke="#6c757d" fontSize={12} />
-                        
-                        {/* Formatea el eje Y para mostrar valores en Millones (M) */}
-                        <YAxis 
-                        stroke="#6c757d" 
-                        fontSize={12} 
-                        tickFormatter={(v) => `$${(v / 1000000)}M`} 
-                        />
-                        
-                        <Tooltip 
-                        formatter={(value) => [`$${Number(value).toLocaleString('es-CO')}`, 'Ventas Mensuales']}
-                        contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e0e0e0' }}
-                        />
-                        
-                        {/* Área suavizada utilizando el color principal de tu paleta premium (#4e73df) */}
-                        <Area 
-                        type="monotone" 
-                        dataKey="Ventas" 
-                        stroke="#4e73df" 
-                        strokeWidth={3}
-                        fillOpacity={1} 
-                        fill="url(#colorVentas)" 
-                        />
-                    </AreaChart>
-                    </ResponsiveContainer>
-                )}
+                  ) : (() => {
+                    // 1. Obtenemos los datos filtrados con ventas > 0
+                    const chartData = getMonthCompareData(salesData).filter(
+                      (item) => Number(item.Ventas) > 0
+                    );
+
+                    // 2. Calculamos la suma total para sacar la proporción % de cada mes
+                    const totalVentas = chartData.reduce(
+                      (acc, item) => acc + Number(item.Ventas), 
+                      0
+                    );
+
+                    // 3. Inyectamos el porcentaje calculado en el array de datos
+                    const dataWithPercentage = chartData.map((item) => {
+                      const val = Number(item.Ventas);
+                      const pct = totalVentas > 0 ? ((val / totalVentas) * 100).toFixed(1) : 0;
+                      return {
+                        ...item,
+                        porcentaje: pct, // Ej: "18.5"
+                      };
+                    });
+
+                    return (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart
+                          data={dataWithPercentage}
+                          margin={{ top: 20, right: 30, left: 20, bottom: 0 }}
+                        >
+                          <defs>
+                            <linearGradient id="colorVentas" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#4e73df" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#4e73df" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line, #f0f0f0)" />
+                          <XAxis dataKey="name" stroke="var(--muted, #6c757d)" fontSize={12} />
+                          <YAxis 
+                            stroke="var(--muted, #6c757d)" 
+                            fontSize={12} 
+                            tickFormatter={(v) => `$${(v / 1000000)}M`} 
+                          />
+                          
+                          {/* 4. Tooltip personalizado para mostrar Monto y Porcentaje */}
+                          <Tooltip 
+                            content={({ active, payload, label }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                return (
+                                  <div 
+                                    className="p-2 shadow-sm rounded border"
+                                    style={{ 
+                                      backgroundColor: 'var(--panel, #fff)', 
+                                      borderColor: 'var(--line, #e0e0e0)',
+                                      fontSize: '0.85rem'
+                                    }}
+                                  >
+                                    <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
+                                      {label}
+                                    </p>
+                                    <p className="mb-0" style={{ color: '#4e73df' }}>
+                                      Ventas: <strong>${Number(data.Ventas).toLocaleString('es-CO')}</strong>
+                                    </p>
+                                    <p className="mb-0 small" style={{ color: '#6c757d'}}>
+                                      Participación: <strong>{data.porcentaje}%</strong> del total
+                                    </p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          
+                          <Area 
+                            type="monotone" 
+                            dataKey="Ventas" 
+                            stroke="#4e73df" 
+                            strokeWidth={3}
+                            fillOpacity={1} 
+                            fill="url(#colorVentas)" 
+                          >
+                            {/* 5. OPCIONAL: Muestra el % justo arriba de cada punto de la gráfica */}
+                            <LabelList 
+                              dataKey="porcentaje" 
+                              position="top" 
+                              formatter={(val) => `${val}%`}
+                              style={{ fill: 'var(--muted, #6c757d)', fontSize: '11px', fontWeight: 'bold' }}
+                            />
+                          </Area>
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
                 </div>
+              </div>
             </div>
-          </div>
+          }
+          
+
+          {/* Grafico de Ventas por presupuesto */}
+          {filters.month.length === 1 ?
+            <div className="col">
+              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-2'}`}>
+                <div className="d-flex justify-content-between align-items-center mb-3">
+                  <h5 className="small fw-bold mb-0">
+                    Comparativa Ventas por C.O. vs Presupuesto ({filters.month[0]})
+                  </h5>
+                </div>
+
+                <div style={{ width: '100%', height: '400px' }}>
+                  {chartData.length === 0 ? (
+                    <div className="h-100 d-flex align-items-center justify-content-center rounded small">
+                      Sin datos - Cargue un archivo
+                    </div>
+                  ) : (() => {
+                    // 1. Calculamos el % de cumplimiento por cada registro
+                    const dataWithCumplimiento = chartData.map((item) => {
+                      const ventas = Number(item.Ventas) || 0;
+                      const presupuesto = Number(item.Presupuesto) || 0;
+                      
+                      // Prevenimos división por cero
+                      const cumplimiento = presupuesto > 0 
+                        ? ((ventas / presupuesto) * 100).toFixed(1) 
+                        : '0.0';
+
+                      return {
+                        ...item,
+                        cumplimiento: cumplimiento, // Ej: "105.4"
+                      };
+                    });
+
+                    return (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={dataWithCumplimiento}
+                          margin={{ top: 25, right: 20, left: 0, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line, #f0f0f0)" />
+                          <XAxis dataKey="name" stroke="var(--muted, #6c757d)" fontSize={12} />
+                          
+                          <YAxis 
+                            stroke="var(--muted, #6c757d)" 
+                            fontSize={11} 
+                            tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
+                          />
+                          
+                          {/* 2. Tooltip Enriquecido con Cumplimiento */}
+                          <Tooltip 
+                            content={({ active, payload, label }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                const pct = Number(data.cumplimiento);
+                                const isSuccess = pct >= 100;
+
+                                return (
+                                  <div 
+                                    className="p-2 shadow-sm rounded border"
+                                    style={{ 
+                                      backgroundColor: 'var(--panel, #fff)', 
+                                      borderColor: 'var(--line, #e0e0e0)',
+                                      fontSize: '0.85rem'
+                                    }}
+                                  >
+                                    <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
+                                      {label}
+                                    </p>
+                                    <p className="mb-1" style={{ color: '#4e73df' }}>
+                                      Ventas: <strong>${Number(data.Ventas).toLocaleString('es-CO')}</strong>
+                                    </p>
+                                    <p className="mb-1" style={{ color: '#1cc88a' }}>
+                                      Presupuesto: <strong>${Number(data.Presupuesto).toLocaleString('es-CO')}</strong>
+                                    </p>
+                                    <hr className="my-1" style={{ borderColor: 'var(--line, #e0e0e0)' }} />
+                                    <p className="mb-0 fw-bold" style={{ color: isSuccess ? '#1cc88a' : '#e74a3b' }}>
+                                      Cumplimiento: {data.cumplimiento}% {isSuccess ? '🎯' : '⚠️'}
+                                    </p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          
+                          <Legend verticalAlign="top" height={36} iconType="circle" />
+                          
+                          {/* 3. Barra de Ventas con el % arriba */}
+                          <Bar 
+                            dataKey="Ventas" 
+                            fill="#4e73df" 
+                            radius={[4, 4, 0, 0]} 
+                            maxBarSize={40}
+                            isAnimationActive={false}
+                          >
+                            <LabelList 
+                              dataKey="cumplimiento" 
+                              position="top" 
+                              formatter={(val) => `${val}%`}
+                              style={{ fill: 'var(--ink, #4e73df)', fontSize: '10px', fontWeight: 'bold' }}
+                            />
+                          </Bar>
+                          
+                          {/* Barra de Presupuesto */}
+                          <Bar 
+                            dataKey="Presupuesto" 
+                            fill="#1cc88a" 
+                            radius={[4, 4, 0, 0]} 
+                            maxBarSize={40}
+                            isAnimationActive={false}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+            :
+            <div className="col">
+              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
+                <div className="d-flex justify-content-between align-items-center mb-3">
+                  <h5 className="small fw-bold mb-0">
+                    Comparativa Ventas vs Presupuesto ({filters.year})
+                  </h5>
+                </div>
+
+                <div style={{ width: '100%', height: '280px' }}>
+                  {chartData.length === 0 ? (
+                    <div className="h-100 d-flex align-items-center justify-content-center rounded small">
+                      Sin datos - Cargue un archivo
+                    </div>
+                  ) : (() => {
+                    // 1. Filtramos los datos y calculamos el % de cumplimiento
+                    const filteredData = chartData.filter((item) => Number(item.Ventas) > 0);
+                    
+                    const dataWithCumplimiento = filteredData.map((item) => {
+                      const ventas = Number(item.Ventas) || 0;
+                      const presupuesto = Number(item.Presupuesto) || 0;
+                      
+                      const cumplimiento = presupuesto > 0 
+                        ? ((ventas / presupuesto) * 100).toFixed(1) 
+                        : '0.0';
+
+                      return {
+                        ...item,
+                        cumplimiento, // Ej: "98.5"
+                      };
+                    });
+
+                    return (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={dataWithCumplimiento}
+                          margin={{ top: 25, right: 30, left: 20, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line, #f0f0f0)" />
+                          <XAxis dataKey="name" stroke="var(--muted, #6c757d)" fontSize={12} />
+                          
+                          <YAxis 
+                            stroke="var(--muted, #6c757d)" 
+                            fontSize={11} 
+                            tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
+                          />
+                          
+                          {/* Tooltip dinámico con indicador de meta */}
+                          <Tooltip 
+                            content={({ active, payload, label }) => {
+                              if (active && payload && payload.length) {
+                                const data = payload[0].payload;
+                                const pct = Number(data.cumplimiento);
+                                const isSuccess = pct >= 100;
+
+                                return (
+                                  <div 
+                                    className="p-2 shadow-sm rounded border"
+                                    style={{ 
+                                      backgroundColor: 'var(--panel, #fff)', 
+                                      borderColor: 'var(--line, #e0e0e0)',
+                                      fontSize: '0.85rem'
+                                    }}
+                                  >
+                                    <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
+                                      {label}
+                                    </p>
+                                    <p className="mb-1" style={{ color: '#4e73df' }}>
+                                      Ventas: <strong>${Number(data.Ventas).toLocaleString('es-CO')}</strong>
+                                    </p>
+                                    <p className="mb-1" style={{ color: '#1cc88a' }}>
+                                      Presupuesto: <strong>${Number(data.Presupuesto).toLocaleString('es-CO')}</strong>
+                                    </p>
+                                    <hr className="my-1" style={{ borderColor: 'var(--line, #e0e0e0)' }} />
+                                    <p className="mb-0 fw-bold" style={{ color: isSuccess ? '#1cc88a' : '#e74a3b' }}>
+                                      Cumplimiento: {data.cumplimiento}% {isSuccess ? '🎯' : '⚠️'}
+                                    </p>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          
+                          <Legend verticalAlign="top" height={36} iconType="circle" />
+                          
+                          {/* Barra de Ventas con etiqueta % arriba */}
+                          <Bar 
+                            dataKey="Ventas" 
+                            fill="#4e73df" 
+                            radius={[4, 4, 0, 0]} 
+                            maxBarSize={40}
+                            isAnimationActive={false}
+                          >
+                            <LabelList 
+                              dataKey="cumplimiento" 
+                              position="top" 
+                              formatter={(val) => `${val}%`}
+                              style={{ fill: 'var(--ink, #4e73df)', fontSize: '10px', fontWeight: 'bold' }}
+                            />
+                          </Bar>
+                          
+                          {/* Barra de Presupuesto */}
+                          <Bar 
+                            dataKey="Presupuesto" 
+                            fill="#1cc88a" 
+                            radius={[4, 4, 0, 0]} 
+                            maxBarSize={40}
+                            isAnimationActive={false}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+          }
 
           {/* Ranking por vendedor */}
           <div className="col">
             <div className="panel rounded shadow-sm p-3">
-                <h5 className="small fw-bold mb-3">Ranking de Vendedores (Top 5)</h5>
-                <div style={{ width: '100%', height: '250px' }}>
+              <h5 className="small fw-bold mb-3">Ranking de Vendedores (Top 10)</h5>
+              <div style={{ width: '100%', height: '380px' }}>
                 {salesData.length === 0 ? (
-                    <div className="h-100 d-flex align-items-center justify-content-center rounded small">
-                        Sin datos - Cargue un archivo
-                    </div>
-                ) : (
+                  <div className="h-100 d-flex align-items-center justify-content-center rounded small">
+                    Sin datos - Cargue un archivo
+                  </div>
+                ) : (() => {
+                  // 1. Obtenemos la data base del ranking
+                  const rawRankingData = getSellerRankingData(salesData);
+
+                  // 2. Calculamos el total para sacar el % de participación
+                  const totalVentasTop = rawRankingData.reduce(
+                    (acc, item) => acc + (Number(item.Ventas) || 0), 
+                    0
+                  );
+
+                  // 3. Inyectamos la participación
+                  const rankingWithPercentage = rawRankingData.map((item) => {
+                    const val = Number(item.Ventas) || 0;
+                    const pct = totalVentasTop > 0 ? ((val / totalVentasTop) * 100).toFixed(1) : '0.0';
+                    return {
+                      ...item,
+                      porcentaje: pct, // Ej: "18.2"
+                    };
+                  });
+
+                  return (
                     <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
+                      <BarChart
                         layout="vertical"
-                        data={getSellerRankingData(salesData)}
-                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                    >
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
-                        <XAxis type="number" tickFormatter={(v) => `$${(v / 1000000)}M`} stroke="#6c757d" fontSize={12} />
-                        <YAxis dataKey="name" type="category" stroke="#6c757d" fontSize={11} width={80} />
-                        <Tooltip 
-                        formatter={(value) => [`$${Number(value).toLocaleString('es-CO')}`, 'Total Ventas']}
-                        contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e0e0e0' }}
+                        data={rankingWithPercentage}
+                        margin={{ top: 5, right: 60, left: 20, bottom: 5 }} // right: 60 para evitar cortes en el %
+                      >
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--line, #f0f0f0)" />
+                        
+                        {/* Eje X: Numérico en millones + extensión del 15% para dar espacio a las etiquetas a la derecha */}
+                        <XAxis 
+                          type="number" 
+                          tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
+                          stroke="var(--muted, #6c757d)" 
+                          fontSize={12} 
+                          domain={[0, (dataMax) => dataMax * 1.15]}
                         />
                         
-                        {/* 🎯 MODIFICADO: Quitamos el 'fill' global y mapeamos celdas individuales */}
-                        <Bar dataKey="Ventas" radius={[0, 4, 4, 0]} barSize={18}>
-                        {
-                            getSellerRankingData(salesData).map((entry, index) => (
+                        {/* Eje Y: Nombres de los vendedores */}
+                        <YAxis 
+                          dataKey="name" 
+                          type="category" 
+                          stroke="var(--muted, #6c757d)" 
+                          fontSize={11} 
+                          width={80} 
+                        />
+                        
+                        {/* Tooltip con total y porcentaje */}
+                        <Tooltip 
+                          content={({ active, payload, label }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div 
+                                  className="p-2 shadow-sm rounded border"
+                                  style={{ 
+                                    backgroundColor: 'var(--panel, #fff)', 
+                                    borderColor: 'var(--line, #e0e0e0)',
+                                    fontSize: '0.85rem'
+                                  }}
+                                >
+                                  <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
+                                    {label}
+                                  </p>
+                                  <p className="mb-0" style={{ color: '#4e73df' }}>
+                                    Total Ventas: <strong>${Number(data.Ventas).toLocaleString('es-CO')}</strong>
+                                  </p>
+                                  <p className="mb-0 small" style={{ color: '#6c757d'}}>
+                                    Participación: <strong>{data.porcentaje}%</strong> del Top 10
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        
+                        {/* Barra de Ventas Horizontales */}
+                        <Bar 
+                          dataKey="Ventas" 
+                          radius={[0, 4, 4, 0]} 
+                          barSize={18}
+                          isAnimationActive={false} // Desactiva animaciones para evitar parpadeos
+                        >
+                          {/* Celdas de colores */}
+                          {rankingWithPercentage.map((entry, index) => (
                             <Cell 
-                                key={`cell-${index}`} 
-                                fill={COLORES_RANKING_VENDEDORES[index % COLORES_RANKING_VENDEDORES.length]} 
+                              key={`cell-${index}`} 
+                              fill={COLORES_RANKING_VENDEDORES[index % COLORES_RANKING_VENDEDORES.length]} 
                             />
-                            ))
-                        }
+                          ))}
+
+                          {/* 🎯 ETIQUETA ESTÁTICA A LA DERECHA */}
+                          <LabelList 
+                            dataKey="porcentaje" 
+                            position="right"
+                            dx={8}
+                            formatter={(val) => `${val}%`}
+                            style={{ fill: '#6c757d', fontSize: '11px', fontWeight: 'bold' }}
+                          />
                         </Bar>
-                    </BarChart>
+                      </BarChart>
                     </ResponsiveContainer>
-                )}
-                </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
           
           {/* Ranking por cliente */}
           <div className="col">
-            <div className="panel rounded shadow-sm p-3">
-                <h5 className="small fw-bold mb-3">Ranking de clientes (Top 8)</h5>
-                <div style={{ width: '100%', height: '350px' }}>
+            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
+              <h5 className="small fw-bold mb-3">Ranking de clientes (Top 10)</h5>
+              <div style={{ width: '100%', height: '380px' }}>
                 {salesData.length === 0 ? (
-                    <div className="h-100 d-flex align-items-center justify-content-center rounded small">
-                        Sin datos - Cargue un archivo
-                    </div>
-                ) : (
+                  <div className="h-100 d-flex align-items-center justify-content-center rounded small">
+                    Sin datos - Cargue un archivo
+                  </div>
+                ) : (() => {
+                  // 1. Obtenemos la data base del ranking
+                  const rawClientData = getSupplierRankingData(salesData);
+
+                  // 2. Calculamos la suma total de las ventas del Top 10
+                  const totalVentasTop = rawClientData.reduce(
+                    (acc, item) => acc + (Number(item.Ventas) || 0), 
+                    0
+                  );
+
+                  // 3. Inyectamos la participación % de cada cliente
+                  const clientWithPercentage = rawClientData.map((item) => {
+                    const val = Number(item.Ventas) || 0;
+                    const pct = totalVentasTop > 0 ? ((val / totalVentasTop) * 100).toFixed(1) : '0.0';
+                    return {
+                      ...item,
+                      porcentaje: pct, // Ej: "15.4"
+                    };
+                  });
+
+                  return (
                     <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                        layout="vertical" // 👈 Hace que las barras sean horizontales
-                        data={getSupplierRankingData(salesData)} // Pasamos los datos filtrados y agrupados
-                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                    >
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
-                        <XAxis type="number" tickFormatter={(v) => `$${(v / 1000000)}M`} stroke="#6c757d" fontSize={12} />
-                        <YAxis dataKey="name" type="category" stroke="#6c757d" fontSize={11} width={80} />
+                      <BarChart
+                        layout="vertical"
+                        data={clientWithPercentage}
+                        margin={{ top: 5, right: 50, left: 20, bottom: 5 }} // right: 50 asegura que el % no se corte
+                      >
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--line, #f0f0f0)" />
+                        <XAxis type="number" tickFormatter={(v) => `$${(v / 1000000)}M`} stroke="var(--muted, #6c757d)" fontSize={12} />
+                        <YAxis dataKey="name" type="category" stroke="var(--muted, #6c757d)" fontSize={11} width={80} />
+                        
+                        {/* Tooltip con información detallada */}
                         <Tooltip 
-                        formatter={(value) => [`$${Number(value).toLocaleString('es-CO')}`, 'Total Ventas']}
-                        contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e0e0e0' }}
+                          content={({ active, payload, label }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div 
+                                  className="p-2 shadow-sm rounded border"
+                                  style={{ 
+                                    backgroundColor: 'var(--panel, #fff)', 
+                                    borderColor: 'var(--line, #e0e0e0)',
+                                    fontSize: '0.85rem'
+                                  }}
+                                >
+                                  <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
+                                    {label}
+                                  </p>
+                                  <p className="mb-0" style={{ color: '#4e73df' }}>
+                                    Total Ventas: <strong>${Number(data.Ventas).toLocaleString('es-CO')}</strong>
+                                  </p>
+                                  <p className="mb-0 small" style={{ color: '#6c757d'}}>
+                                    Participación: <strong>{data.porcentaje}%</strong> del Top 10
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
                         />
-                        {/* Barra estilizada con un color verde éxito o azul corporativo */}
-                        <Bar dataKey="Ventas" radius={[0, 4, 4, 0]} barSize={18}>
-                        {
-                            getSupplierRankingData(salesData).map((entry, index) => (
+                        
+                        {/* Barra de Ventas Estática */}
+                        <Bar 
+                          dataKey="Ventas" 
+                          radius={[0, 4, 4, 0]} 
+                          barSize={18}
+                          isAnimationActive={false} // 👈 Elimina animaciones para mantener los textos estáticos
+                        >
+                          {/* Colores individuales para cada cliente */}
+                          {clientWithPercentage.map((entry, index) => (
                             <Cell 
-                                key={`cell-${index}`} 
-                                fill={COLORES_RANKING_CLIENTES[index % COLORES_RANKING_CLIENTES.length]} 
+                              key={`cell-${index}`} 
+                              fill={COLORES_RANKING_CLIENTES[index % COLORES_RANKING_CLIENTES.length]} 
                             />
-                            ))
-                        }
+                          ))}
+
+                          {/* 🎯 ETIQUETA ESTÁTICA NATIVA A LA DERECHA */}
+                          <LabelList
+                              dataKey="porcentaje"
+                              content={<RenderPercentage />}
+                          />
                         </Bar>
-                    </BarChart>
+                      </BarChart>
                     </ResponsiveContainer>
-                )}
-                </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
 
           {/* Ventas por linea */}
-          <div className="col">
-            <div className="panel rounded shadow-sm p-3">
-                <h5 className="small fw-bold mb-3">Participación por Línea de Producto</h5>
-                <div style={{ width: '100%', height: '350px' }}>
+          <div className="col w-100">
+            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
+              <h5 className="small fw-bold mb-3">Participación por Línea de Producto</h5>
+              <div style={{ width: '100%', height: '350px' }}>
                 {salesData.length === 0 ? (
-                    <div className="h-100 d-flex align-items-center justify-content-center rounded small">
-                        Sin datos - Cargue un archivo
-                    </div>
-                ) : (
+                  <div className="h-100 d-flex align-items-center justify-content-center rounded small">
+                    Sin datos - Cargue un archivo
+                  </div>
+                ) : (() => {
+                  // 1. Obtenemos la data base de las líneas de producto
+                  const rawLineData = getLineShareData(salesData);
+
+                  // 2. Calculamos el total acumulado de todas las líneas
+                  const totalVentasLineas = rawLineData.reduce(
+                    (acc, item) => acc + (Number(item.value) || 0), 
+                    0
+                  );
+
+                  // 3. Inyectamos el % de participación de cada línea
+                  const lineWithPercentage = rawLineData.map((item) => {
+                    const val = Number(item.value) || 0;
+                    const pct = totalVentasLineas > 0 ? ((val / totalVentasLineas) * 100).toFixed(1) : '0.0';
+                    return {
+                      ...item,
+                      porcentaje: pct, // Ej: "24.5"
+                    };
+                  });
+
+                  return (
                     <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
+                      <BarChart
+                        data={lineWithPercentage}
+                        margin={{ top: 30, right: 30, left: 20, bottom: 60 }} // top: 30 deja espacio para la etiqueta estática
+                      >
+                        {/* Líneas de guía tenues */}
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line, #f0f0f0)" />
+                        
+                        {/* Eje X (Nombres de las Líneas) */}
+                        <XAxis 
+                          dataKey="name" 
+                          tick={{ fontSize: 11, fill: 'var(--muted, #6c757d)' }}
+                          interval={0}
+                          angle={-30} 
+                          textAnchor="end"
+                        />
+                        
+                        {/* Eje Y (Valores Monetarios) */}
+                        <YAxis 
+                          tick={{ fontSize: 11, fill: 'var(--muted, #6c757d)' }}
+                          tickFormatter={(val) => `$${(val / 1000000).toFixed(0)}M`} 
+                        />
+                        
+                        {/* Tooltip dinámico con Monto y Participación */}
                         <Tooltip 
-                        formatter={(value) => [`$${Number(value).toLocaleString('es-CO')}`, 'Total Ventas']}
-                        contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e0e0e0' }}
+                          content={({ active, payload, label }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div 
+                                  className="p-2 shadow-sm rounded border"
+                                  style={{ 
+                                    backgroundColor: 'var(--panel, #fff)', 
+                                    borderColor: 'var(--line, #e0e0e0)',
+                                    fontSize: '0.85rem'
+                                  }}
+                                >
+                                  <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
+                                    {label}
+                                  </p>
+                                  <p className="mb-0" style={{ color: '#4e73df' }}>
+                                    Total Ventas: <strong>${Number(data.value).toLocaleString('es-CO')}</strong>
+                                  </p>
+                                  <p className="mb-0 small" style={{ color: '#6c757d'}}>
+                                    Participación: <strong>{data.porcentaje}%</strong> del total
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
                         />
-                        {/* Leyenda inferior que acomoda de forma dinámica los nombres de las líneas */}
-                        <Legend 
-                            verticalAlign="bottom" 
-                            height={150} 
-                            iconType="circle"
-                            wrapperStyle={{ fontSize: '11px', color: '#6c757d' }}
-                        />
-                        <Pie
-                            data={getLineShareData(salesData)}
-                            cx="50%" // Centrado horizontal
-                            cy="45%" // Centrado vertical un poco elevado para dejar espacio a la leyenda
-                            innerRadius={50} // 🎯 Esto lo convierte en dona. Si lo dejas en 0, será una torta completa.
-                            outerRadius={80}
-                            paddingAngle={0} // Pequeña separación elegante entre cada rebanada
-                            dataKey="value"
+                        
+                        {/* Barras verticales sin animación con % estático arriba */}
+                        <Bar 
+                          dataKey="value" 
+                          radius={[6, 6, 0, 0]}
+                          isAnimationActive={false} // 👈 Mantiene las etiquetas fijas y estáticas
                         >
-                        {
-                            getLineShareData(salesData).map((entry, index) => (
+                          {lineWithPercentage.map((entry, index) => (
                             <Cell 
-                                key={`cell-${index}`} 
-                                fill={COLORES_LINEA[index % COLORES_LINEA.length]} 
+                              key={`cell-${index}`} 
+                              fill={COLORES_LINEA[index % COLORES_LINEA.length]} 
                             />
-                            ))
-                        }
-                        </Pie>
-                    </PieChart>
+                          ))}
+
+                          {/* 🎯 ETIQUETA ESTÁTICA NATIVA ARRIBA DE CADA BARRA */}
+                          <LabelList 
+                            dataKey="porcentaje" 
+                            position="top"
+                            formatter={(val) => `${val}%`}
+                            style={{ fill: 'var(--muted, #6c757d)', fontSize: '11px', fontWeight: 'bold' }}
+                          />
+                        </Bar>
+                      </BarChart>
                     </ResponsiveContainer>
-                )}
-                </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
 

@@ -4,6 +4,8 @@ import { createUser, deleteUserByUsername, findUsers, updateUser } from "../../s
 import { NavBarData } from '../../components/Navbar/NavbarData';
 import { getAllAgencies } from '../../services/agencyService';
 import AuthContext from '../../context/authContext';
+import { createBudget, createMultipleBudget, findBudgets, findBudgetsByYear, updateMultiple } from '../../services/budgetService';
+import {  NumericFormat  }  from  'react-number-format' ;
 import Chulo from '../../assets/chulo-verde.png'
 import { FaUnlock } from "react-icons/fa";
 import { FaLock } from "react-icons/fa";
@@ -22,10 +24,19 @@ export default function Users() {
   const [loading, setLoading] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const [agencies, setAgencies] = useState([]);
+  const [budgets, setBudgets] = useState([]);
+  const [totalBudget, setTotalBudget] = useState([]);
+  const [newBudget, setNewBudget] = useState([]);
+  const [updateBudget, setUpdateBudget] = useState([]);
+  const [editBudget, setEditBudget] = useState(false);
   const { user, setUser } = useContext(AuthContext);
   const activeAndAllowedModules = allModules.filter(mod => mod.active);
   const [editing, setEditing] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [anio, setAnio] = useState(new Date().getFullYear());
+  const [years, setYears] = useState('');
+  const [tablaAnio, setTablaAnio] = useState([]);
+  const [columnas, setColumnas] = useState();
 
   // 3. Estados locales para controlar el formulario de "Crear usuario"
   const [userForm, setUserForm] = useState({
@@ -43,6 +54,7 @@ export default function Users() {
   useEffect(() => {
     getAllUsers();
     getAllAgencies().then((data) => setAgencies(data));
+    getBudgets();
   }, []);
 
   const getAllUsers = () => {
@@ -57,6 +69,115 @@ export default function Users() {
         setLoading(false)
       });
   }
+
+  const mesesOrden = [
+    "Ene",
+    "Feb",
+    "Mar",
+    "Abr",
+    "May",
+    "Jun",
+    "Jul",
+    "Ago",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dic",
+  ];
+
+  const cos = [
+    "001",
+    "002",
+    "003",
+    "004",
+    "005",
+    "006",
+    "007",
+    "008",
+    "009",
+    "010",
+    "020",
+    "100",
+  ];
+
+  const construirTabla = (data) => {
+    const anios = [...new Set(data.map(x => x.anio))];
+    /* setYears(anios) */
+    const tablas = {};
+    anios.forEach(anio => {
+        tablas[anio] = mesesOrden.map(mes => {
+            const fila = {
+                mes
+            };
+            cos.forEach(co => {
+                fila[co] = "";
+            });
+            return fila;
+        });
+    });
+
+    data.forEach(item => {
+        const fila = tablas[item.anio]
+            .find(x => x.mes === item.mes)
+        if (fila) {
+            fila[item.co] = item.monto;
+        }
+    });
+
+    return tablas;
+}
+
+  const agruparDatos = (datos) => {
+    const resultado = {};
+    datos.forEach(item => {
+        if (!resultado[item.anio]) {
+            resultado[item.anio] = {};
+        }
+        if (!resultado[item.anio][item.mes]) {
+            resultado[item.anio][item.mes] = {
+                mes: item.mes
+            };
+        }
+        resultado[item.anio][item.mes][item.co] = `$ ${Number(item.monto).toLocaleString()}`;
+    });
+
+    // convertir a arreglo ordenado por meses
+    Object.keys(resultado).forEach(anio => {
+        resultado[anio] = mesesOrden
+            .filter(mes => resultado[anio][mes])
+            .map(mes => resultado[anio][mes]);
+    });
+
+    return resultado;
+  }
+
+  const getBudgets = () => {
+    findBudgets()
+    .then(({data})=>{
+      setTotalBudget(data);
+
+      const anios = [...new Set(data.map(x => x.anio))];
+      setYears(anios)
+
+      //filtro de las columnas
+      const column = [...new Set(data.map(x => x.co))].sort();
+      setColumnas(column)
+
+      //el primer filtro de los presupuestos por año
+      const datosFiltrados = data.filter(item => Number(item.anio) === anio);
+      const fillBudget = construirTabla(datosFiltrados);
+      setBudgets(fillBudget)
+    })
+    .catch(()=>{
+      console.log('error')
+    })
+  }
+
+ useEffect(()=>{
+  const datosFiltrados = totalBudget.filter(item => Number(item.anio) === anio);
+  const fillBudget = construirTabla(datosFiltrados);
+  setBudgets(fillBudget)
+ },[anio])
 
   /* Funcion para crear nuevos usuarios */
   const handleCreateNewUser = (e) => {
@@ -269,6 +390,169 @@ export default function Users() {
         window.removeEventListener('resize', handleResize);
       };
     }, []);
+
+  //funcion para identificar los nuevos presupuestos
+  const handleCellChange = (anioCelda, mesCelda, coCelda, nuevoValor) => {
+    // Convertimos el valor de string a número (si es vacío, lo dejamos como 0 o vacío según tu backend)
+    const montoNumerico = nuevoValor === "" || nuevoValor === null ? "" : Number(nuevoValor);
+
+    setNewBudget((prevTotalBudget) => {
+      // 1. Buscamos si ya existe un registro con este año, mes y co
+      const indiceExistente = prevTotalBudget.findIndex(
+        (item) =>
+          Number(item.anio) === Number(anioCelda) &&
+          item.mes === mesCelda &&
+          item.co === coCelda
+      );
+
+      if (indiceExistente !== -1) {
+        // 2. Si existe, creamos una copia del array y actualizamos el monto
+        const nuevoBudget = [...prevTotalBudget];
+        nuevoBudget[indiceExistente] = {
+          ...nuevoBudget[indiceExistente],
+          monto: montoNumerico.toString() // o montoNumerico directamente, según tu backend
+        };
+        return nuevoBudget;
+      } else {
+        // 3. Si no existe (era una celda vacía y nueva), agregamos un nuevo objeto al array
+        const nuevoRegistro = {
+          co: coCelda,
+          mes: mesCelda,
+          anio: Number(anioCelda),
+          monto: montoNumerico.toString()
+        };
+        return [...prevTotalBudget, nuevoRegistro];
+      }
+    });
+  };
+
+  //funcion para crear los nuevos presupuestos
+  const handleCreateBudget = (e) => {
+    e.preventDefault();
+    if(newBudget.length > 0){
+      createMultipleBudget(newBudget)
+      .then(()=>{
+        Swal.fire({
+          imageUrl: Chulo,
+          imageWidth: 100,
+          title: '¡Correcto!',
+          text: 'Se han agregado los nuevos presupuestos al sistema',
+          showConfirmButton: false,
+          timer: 5000,
+          customClass: {
+            image: 'mb-0 mt-3 pb-0',
+            title: 'mt-1 pt-0'
+          }
+        })
+        setNewBudget([])
+        getBudgets();
+      })
+      .catch(()=>{
+        Swal.fire({
+          icon: 'warning',
+          title: '¡ERROR!',
+          text: 'Ha ocurrido un error al momento de agregar los nuevos presupuestos, vuelvelo a intentar mas tarde.',
+          showConfirmButton: true,
+          confirmButtonColor: 'red',
+          confirmButtonText: 'OK'
+        })
+      })
+    }else {
+      Swal.fire({
+        icon: 'warning',
+        title: '¡ATENCION!',
+        text: 'no hay información nuevo por agregar',
+        showConfirmButton: false,
+        timmer: 5000
+      })
+    }
+  }
+
+  //funcion para optener los que se van a editar
+  const handleCellEdit = (anioCelda, mesCelda, coCelda, nuevoValor) => {
+    // Convertimos el valor de string a número (si es vacío, lo dejamos como 0 o vacío según tu backend)
+    const montoNumerico = nuevoValor === "" || nuevoValor === null ? "" : Number(nuevoValor);
+
+    setUpdateBudget((prevTotalBudget) => {
+      // 1. Buscamos si ya existe un registro con este año, mes y co
+      const indiceExistente = prevTotalBudget.findIndex(
+        (item) =>
+          Number(item.anio) === Number(anioCelda) &&
+          item.mes === mesCelda &&
+          item.co === coCelda
+      );
+
+      if (indiceExistente !== -1) {
+        // 2. Si existe, creamos una copia del array y actualizamos el monto
+        const nuevoBudget = [...prevTotalBudget];
+        nuevoBudget[indiceExistente] = {
+          ...nuevoBudget[indiceExistente],
+          monto: montoNumerico.toString() // o montoNumerico directamente, según tu backend
+        };
+        return nuevoBudget;
+      } else {
+        // 3. Si no existe (era una celda vacía y nueva), agregamos un nuevo objeto al array
+        const nuevoRegistro = {
+          co: coCelda,
+          mes: mesCelda,
+          anio: Number(anioCelda),
+          monto: montoNumerico.toString()
+        };
+        return [...prevTotalBudget, nuevoRegistro];
+      }
+    });
+  };
+
+  //funcion para carcelar la edición
+  const cancelEditBudget = (e) => {
+    e.preventDefault();
+    setEditBudget(false);
+    setUpdateBudget([]);
+    window.location.reload();
+  }
+
+  //funcion para crear los nuevos presupuestos
+  const handleUpdateBudget = (e) => {
+    e.preventDefault();
+    if(updateBudget.length > 0){
+      updateMultiple(updateBudget)
+      .then(()=>{
+        Swal.fire({
+          imageUrl: Chulo,
+          imageWidth: 100,
+          title: '¡Correcto!',
+          text: 'Se han actualizado los presupuestos en el sistema',
+          showConfirmButton: false,
+          timer: 5000,
+          customClass: {
+            image: 'mb-0 mt-3 pb-0',
+            title: 'mt-1 pt-0'
+          }
+        })
+        setEditBudget(false);
+        setUpdateBudget([]);
+        getBudgets();
+      })
+      .catch(()=>{
+        Swal.fire({
+          icon: 'warning',
+          title: '¡ERROR!',
+          text: 'Ha ocurrido un error al momento de actualizar los presupuestos, vuelvelo a intentar mas tarde.',
+          showConfirmButton: true,
+          confirmButtonColor: 'red',
+          confirmButtonText: 'OK'
+        })
+      })
+    }else {
+      Swal.fire({
+        icon: 'warning',
+        title: '¡ATENCION!',
+        text: 'no hay información nuevo por agregar',
+        showConfirmButton: false,
+        timmer: 5000
+      })
+    }
+  }
 
   return (
     <div className="p-2 stack gap-2">
@@ -505,8 +789,8 @@ export default function Users() {
           </table>
         </div>
       </div>
-
-      {/* Tabla 2: Gestión de módulos */}
+      
+      {/* Tabla 3: Gestión de módulos */}
       <div className="panel mb-4">
         <div className="panel-head d-flex justify-content-between align-items-center">
           <h2>Gestión de módulos</h2>

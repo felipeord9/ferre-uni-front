@@ -1,5 +1,5 @@
 /* #wrapper {
-  background-image: url('./assets/fondo-lavados.png');
+  background-image: url('./assets/fondoFerre.jpeg');
   background-color: rgba(255, 255, 255, 0.6);
   background-blend-mode: overlay;
   background-repeat: no-repeat;
@@ -128,12 +128,13 @@ label {
 }
 
 .login-view {
-  min-height: 100vh;
+  /* min-height: 100vh; */
+  background-size: 100% 100%;
   display: grid;
   grid-template-columns: minmax(320px, 440px) 1fr;
   background:
     linear-gradient(120deg, rgba(16, 33, 63, .95), rgba(15, 118, 110, .5)),
-    url("../src/assets/fondo.png") center/cover;
+    url("../src/assets/fondoFerre2.png") center/cover;
 }
 
 .login-card {

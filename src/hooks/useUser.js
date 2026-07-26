@@ -41,6 +41,8 @@ export default function useUser() {
   const logout = useCallback(() => {
     window.localStorage.removeItem("token")
     window.localStorage.removeItem("user")
+    window.localStorage.removeItem("paici.theme")
+    window.localStorage.removeItem("paici.modules")
     setToken(null)
     setUser(null)
   }, [setToken, setUser])

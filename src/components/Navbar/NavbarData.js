@@ -8,6 +8,7 @@ import { IoIosTrendingUp } from "react-icons/io";
 import { CgSearchFound } from "react-icons/cg";
 import { FiPackage } from "react-icons/fi";
 import { CiSettings } from "react-icons/ci";
+import { LuGoal } from "react-icons/lu";
 
 export const NavBarData = [
   {
@@ -36,6 +37,18 @@ export const NavBarData = [
   },
   {
     id: 3,
+    title: "Presupuesto",
+    path: "/presupuesto",
+    icon: <LuGoal />,
+    cName: "nav-text",
+    description: 'Resumen presupuesto del portal.',
+    type: 'native',
+    version: '1.0.0',
+    active: true,
+    access: ['admin']
+  },
+  {
+    id: 4,
     title: "Inventario",
     path: "/inventario",
     icon: <FiPackage />,
@@ -47,7 +60,7 @@ export const NavBarData = [
     access: ['admin']
   },
   {
-    id: 4,
+    id: 5,
     title: "Control Interno",
     path: "/control/interno",
     icon: <CgSearchFound />,
@@ -59,7 +72,7 @@ export const NavBarData = [
     access: ['admin']
   },
   {
-    id: 5,
+    id: 6,
     title: "Administración",
     path: "/administracion",
     icon: <CiSettings />,

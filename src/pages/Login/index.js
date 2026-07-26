@@ -104,7 +104,7 @@ export default function Login() {
           <div className="brand-block">
             <span className="brand-icon">{/* <Icons.ShieldCheck /> */}<img src={Logo} className='w-100'/></span>
             <div className='ms-2'>
-              <h1>Portal de Analítica y Control Interno</h1>
+              <h1>Tableros de control</h1>
               <p>Dashboards, control, permisos y módulos en una sola plataforma.</p>
             </div>
           </div>
