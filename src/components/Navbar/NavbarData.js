@@ -9,6 +9,7 @@ import { CgSearchFound } from "react-icons/cg";
 import { FiPackage } from "react-icons/fi";
 import { CiSettings } from "react-icons/ci";
 import { LuGoal } from "react-icons/lu";
+import { TbReportMoneyFilled } from "react-icons/tb";
 
 export const NavBarData = [
   {
@@ -42,6 +43,18 @@ export const NavBarData = [
     icon: <LuGoal />,
     cName: "nav-text",
     description: 'Resumen presupuesto del portal.',
+    type: 'native',
+    version: '1.0.0',
+    active: true,
+    access: ['admin']
+  },
+  {
+    id: 3,
+    title: "Rentabilidad",
+    path: "/margen",
+    icon: <TbReportMoneyFilled />,
+    cName: "nav-text",
+    description: 'Resumen rentabilidad del portal.',
     type: 'native',
     version: '1.0.0',
     active: true,

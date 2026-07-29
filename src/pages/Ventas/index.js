@@ -8,6 +8,7 @@ import { FaUnlock } from "react-icons/fa";
 import { FaLock } from "react-icons/fa";
 import { BsCloudUploadFill } from 'react-icons/bs';
 import { MdRefresh, MdAddCircle } from 'react-icons/md';
+import { findMargins } from '../../services/marginService'
 import { 
     BarChart, Bar, 
     Cell, XAxis, YAxis, 
@@ -28,19 +29,6 @@ const COLORES_RANKING_CLIENTES = ['#1cc88a', '#4e73df', '#e74a3b', '#f6c23e', '#
 const COLORES_LINEA = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#6f42c1'];
 
 //estilos personalidados para el select multiple
-/* const customSelectStyles = {
-  control: (base) => ({
-    ...base,
-    borderRadius: '0.375rem',
-    borderColor: '#dee2e6',
-    minHeight: '30px',
-    maxHeight: '60px',
-    overflowY: 'auto',
-    boxShadow: 'none',
-    '&:hover': { borderColor: '#86b7fe' }
-  })
-}; */
-
 const customSelectStyles2 = {
   // 1. Contenedor principal del input
   control: (base, state) => ({
@@ -348,6 +336,7 @@ export default function Ventas() {
     city: [],
     clientType: [],
     supplier: [],
+    listPrice: [],
     year: new Date().getFullYear().toString(),
     month: [],
     startDate: '',
@@ -362,6 +351,8 @@ export default function Ventas() {
     invoices: '0',
     customers: '0',
     margen: '',
+    expectedMargin: 27,
+    marginStatus: '',
   });
 
   const [salesRowsCount, setSalesRowsCount] = useState(0);
@@ -374,6 +365,7 @@ export default function Ventas() {
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [marginsData, setMarginsData] = useState([]);
 
   // 🎯 ESTADOS PARA LA PAGINACIÓN (Evita el congelamiento del DOM)
   const [currentPage, setCurrentPage] = useState(1);
@@ -387,6 +379,7 @@ export default function Ventas() {
     years: [],
     months: [],
     suppliers: [],
+    listPrice: [],
   });
 
   const colors = {
@@ -408,6 +401,7 @@ export default function Ventas() {
       }, 0);
       setYearBudget(suma)
     })
+    findMargins().then(({data})=>setMarginsData(data))
   },[]);
 
   const mesesConNumero = [
@@ -479,7 +473,7 @@ export default function Ventas() {
   };
 
   // Función para calcular los KPIs basados en el listado actual de datos
-    const calculateKPIs = (rows) => {
+    const calculateKPIs = (rows, expectedMargin = 27) => {
     if (!rows || rows.length === 0) {
         return { totalSales: '$0', goalProgress: '0%', invoices: '0', customers: '0', margen: '0%' };
     }
@@ -493,13 +487,21 @@ export default function Ventas() {
     // 3. Clientes Únicos: Contamos cuántas cédulas/nit 'cliente' diferentes existen
     const uniqueCustomers = new Set(rows.map(row => row.cliente).filter(Boolean)).size;
 
-    // 4. Calcular la margen 
+    // 4. CÁLCULO DEL MARGEN BRUTO REAL PONDERADO (%)
     const suMargen = rows.reduce((sum, row) => sum + (parseFloat(row.margen) || 0), 0);
-    const calculateMargen = suMargen / rows.length
+    const calculateMargen = suMargen / rows.length;
 
-    // 4. Cumplimiento Meta
-    const metaEmpresa = calculateGoal(filters.month, filters.year) 
+    // 6. Cumplimiento Meta
+    const metaEmpresa = calculateGoal(filters.month, filters.year)
     const porcentajeMeta = (parseFloat(total) / metaEmpresa) * 100 /* Math.min((total / metaEmpresa) * 100, 100); */ // Tope de 100%
+
+    // 7. DETERMINAR ESTADO DEL SEMÁFORO
+    let marginStatus = 'danger'; // Rojo si está por debajo
+    if (calculateMargen >= expectedMargin) {
+      marginStatus = 'success'; // Verde si alcanza o supera la meta
+    } else if (calculateMargen >= expectedMargin - 2) {
+      marginStatus = 'warning'; // Amarillo (tolerancia de hasta 2% por debajo)
+    }
 
     return {
         totalSales: `$${Math.round(total).toLocaleString('es-CO')}`,
@@ -507,6 +509,8 @@ export default function Ventas() {
         invoices: uniqueInvoices.toLocaleString('es-CO'),
         customers: uniqueCustomers.toLocaleString('es-CO'),
         margen: `${calculateMargen.toFixed(2)}%`,
+        expectedMargin: expectedMargin,
+        marginStatus: marginStatus,
     };
   };
 
@@ -605,6 +609,8 @@ export default function Ventas() {
         "Cantidad": "cantidad",
         "Valor bruto": "valor",
         "Márgen promedio": "margen",
+        "Lista de precios": "idListPrice",
+        "Desc. lista de precios": "descLp"
       };
 
       const transformedRows = jsonRows.map(row => {
@@ -621,7 +627,10 @@ export default function Ventas() {
             newRow[newKey] = originalValue !== undefined && originalValue !== null
               ? String(originalValue).trim().padStart(3, '0')
               : '';
-          } else {
+          } else if (newKey === 'linea') {
+            const originalValue = String(row[originalKey] || '').trim();
+            newRow[newKey] = originalValue.replace(/^\d{4}\s*-\s*/, '').trim();
+          }else {
             newRow[newKey] = row[originalKey];
           }
         }
@@ -657,6 +666,7 @@ export default function Ventas() {
       const uniqueCities = [...new Set(transformedRows.map(item => item.co).filter(Boolean))];
       const uniqueClientTypes = [...new Set(transformedRows.map(item => item.typeClient).filter(Boolean))];
       const uniqueSupplier = [...new Set(transformedRows.map(item => item.proveedor).filter(Boolean))];
+      const uniqueListPrice = [...new Set(transformedRows.map(item => item.descLp).filter(Boolean))];
       
       const uniqueYears = [...new Set(transformedRows.map(item => {
         if (!item.date) return null;
@@ -684,6 +694,7 @@ export default function Ventas() {
         years: uniqueYears,
         months: uniqueMonth,
         suppliers: uniqueSupplier,
+        listPrice: uniqueListPrice,
       });
 
       // 🎯 3. DETECTAR AÑO Y MES ACTUAL
@@ -802,12 +813,26 @@ export default function Ventas() {
       filtered = filtered.filter(row => filters.clientType.includes(row.typeClient));
     }
 
+    // 🎯 5. CÁLCULO DE LA RENTABILIDAD ESPERADA (MARGEN META)
+    let expectedMargin = 27; // Valor por defecto si no hay C.O. seleccionado o hay varios
+
+    const selectedCities = (filters.city || []).map(c => c.value || c);
+
+    if (selectedCities.length === 1) {
+      const selectedCo = String(selectedCities[0]).padStart(3, '0');
+      const coMatch = marginsData.find(m => String(m.co).padStart(3, '0') === selectedCo);
+      
+      if (coMatch && coMatch.expectedMargin) {
+        expectedMargin = parseFloat(coMatch.expectedMargin);
+      }
+    }
+
     // Actualización de estado
     setSalesData(filtered);
     setSalesRowsCount(filtered.length);
     setCurrentPage(1);
 
-    const filteredKpis = calculateKPIs(filtered);
+    const filteredKpis = calculateKPIs(filtered, expectedMargin);
     setKpiData(filteredKpis);
 
   }, [filters, rawSalesData]);
@@ -1135,7 +1160,7 @@ export default function Ventas() {
     >
         {value}%
     </text>
-);
+  );
 
   return (
     <div className="container-fluid p-2 stack gap-4 w-100">
@@ -1432,8 +1457,54 @@ export default function Ventas() {
           />
         </div>
 
+        {/* Filtro por lista de precio */}
+        <div className="col-12 col-sm-6 col-md-3 mt-1">
+          <label className="form-label fw-semibold small mb-1">Lista de precio</label>
+          <Select
+            isMulti
+            // 1. Agregamos la opción "Seleccionar Todos" al inicio del array de opciones
+            options={[
+              { value: '*', label: '--- Seleccionar Todos ---' },
+              ...filterOptions.listPrice.map(t => ({ value: t, label: t }))
+            ]}
+            value={filters.listPrice.map(t => ({ value: t, label: t }))}
+            onChange={(selectedOptions, actionMeta) => {
+              // Manejo cuando no hay nada seleccionado o se limpian los datos
+              if (!selectedOptions || selectedOptions.length === 0) {
+                setFilters({ ...filters, listPrice: [] });
+                return;
+              }
+
+              // 2. Comprobamos si el usuario hizo clic en "Seleccionar Todos"
+              const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
+
+              if (hasSelectAll) {
+                // Si ya están todos seleccionados y el usuario hace clic en desmarcar uno, o si seleccionó "Todos"
+                if (filters.listPrice.length === filterOptions.listPrice.length) {
+                  // Si ya estaban todos y tocó algo, o volvió a pulsar seleccionar todos: vaciamos la selección
+                  setFilters({ ...filters, listPrice: [] });
+                } else {
+                  // Si no estaban todos seleccionados, marcamos todos los proveedores disponibles
+                  setFilters({
+                    ...filters,
+                    listPrice: filterOptions.listPrice
+                  });
+                }
+              } else {
+                // Selección normal de opciones individuales
+                setFilters({
+                  ...filters,
+                  listPrice: selectedOptions.map(opt => opt.value)
+                });
+              }
+            }}
+            placeholder="Buscar..."
+            styles={customSelectStyles}
+          />
+        </div>
+
         {/* Filtro por fecha */}
-        <div className="col-12 col-sm-6 col-md-2">
+        {/* <div className="col-12 col-sm-6 col-md-2">
           <label className="form-label fw-semibold text-secondary small mb-1">Desde</label>
           <input 
             type="date" 
@@ -1451,7 +1522,7 @@ export default function Ventas() {
             disabled={filters.startDate ? false : true}
             onChange={e => setFilters({...filters, endDate: e.target.value})}
           />
-        </div>
+        </div> */}
 
         {/* filtro por mes */}
         <div className="col-12 col-sm-6 col-md-2">
@@ -1493,7 +1564,7 @@ export default function Ventas() {
               }
             }}
             placeholder="Buscar..."
-            styles={customSelectStyles2}
+            styles={customSelectStyles}
           />
         </div>
 
@@ -1537,7 +1608,13 @@ export default function Ventas() {
             <KpiCard title="Clientes" value={kpiData.customers} subtitle="Clientes únicos" />
           </div> */}
           <div className="col-12 col-sm-6 col-lg-3">
-            <KpiCardMargen title="Margen" value={kpiData.margen} subtitle="Margen bruto" />
+            <KpiCardMargen 
+              title="Margen" 
+              value={kpiData.margen} 
+              subtitle="Margen bruto" 
+              status={kpiData.marginStatus}
+              expectedValue={kpiData.expectedMargin}
+            />
           </div>
         </div>
 
@@ -1913,7 +1990,7 @@ export default function Ventas() {
                     const pct = totalVentasTop > 0 ? ((val / totalVentasTop) * 100).toFixed(1) : '0.0';
                     return {
                       ...item,
-                      porcentaje: pct, // Ej: "18.2"
+                      porcentaje: pct,
                     };
                   });
 
@@ -1922,11 +1999,11 @@ export default function Ventas() {
                       <BarChart
                         layout="vertical"
                         data={rankingWithPercentage}
-                        margin={{ top: 5, right: 60, left: 20, bottom: 5 }} // right: 60 para evitar cortes en el %
+                        margin={{ top: 5, right: 60, left: 20, bottom: 5 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--line, #f0f0f0)" />
                         
-                        {/* Eje X: Numérico en millones + extensión del 15% para dar espacio a las etiquetas a la derecha */}
+                        {/* Eje X: Numérico en millones */}
                         <XAxis 
                           type="number" 
                           tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
@@ -1979,7 +2056,7 @@ export default function Ventas() {
                           dataKey="Ventas" 
                           radius={[0, 4, 4, 0]} 
                           barSize={18}
-                          isAnimationActive={false} // Desactiva animaciones para evitar parpadeos
+                          isAnimationActive={false}
                         >
                           {/* Celdas de colores */}
                           {rankingWithPercentage.map((entry, index) => (
@@ -1989,12 +2066,15 @@ export default function Ventas() {
                             />
                           ))}
 
-                          {/* 🎯 ETIQUETA ESTÁTICA A LA DERECHA */}
+                          {/* 🎯 ETIQUETA A LA DERECHA: Total Ventas formateado a Millones ($115M) */}
                           <LabelList 
-                            dataKey="porcentaje" 
+                            dataKey="Ventas" 
                             position="right"
                             dx={8}
-                            formatter={(val) => `${val}%`}
+                            formatter={(val) => {
+                              const num = Number(val) || 0;
+                              return `$${(num / 1000000).toLocaleString('es-CO', { maximumFractionDigits: 1 })}M`;
+                            }}
                             style={{ fill: '#6c757d', fontSize: '11px', fontWeight: 'bold' }}
                           />
                         </Bar>
@@ -2092,12 +2172,140 @@ export default function Ventas() {
                           ))}
 
                           {/* 🎯 ETIQUETA ESTÁTICA NATIVA A LA DERECHA */}
-                          <LabelList
+                          <LabelList 
+                            dataKey="Ventas" 
+                            position="right"
+                            dx={8}
+                            formatter={(val) => {
+                              const num = Number(val) || 0;
+                              return `$${(num / 1000000).toLocaleString('es-CO', { maximumFractionDigits: 1 })}M`;
+                            }}
+                            style={{ fill: '#6c757d', fontSize: '11px', fontWeight: 'bold' }}
+                          />
+                          {/* <LabelList
                               dataKey="porcentaje"
                               content={<RenderPercentage />}
-                          />
+                          /> */}
                         </Bar>
                       </BarChart>
+                    </ResponsiveContainer>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* Ventas por lista de precio */}
+          <div className="col">
+            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
+              <h5 className="small fw-bold mb-3">Ventas por Lista de Precio</h5>
+              <div style={{ width: '100%', height: '380px' }}>
+                {salesData.length === 0 ? (
+                  <div className="h-100 d-flex align-items-center justify-content-center rounded small">
+                    Sin datos - Cargue un archivo
+                  </div>
+                ) : (() => {
+                  // 1. Agrupamos los datos de ventas por "descLp"
+                  const lpGrouped = salesData.reduce((acc, curr) => {
+                    const lpName = curr.descLp || curr.desc_lp || 'Sola / Sin Lista';
+                    const valor = Number(curr.monto || curr.valor || curr.total || 0);
+
+                    if (!acc[lpName]) {
+                      acc[lpName] = 0;
+                    }
+                    acc[lpName] += valor;
+                    return acc;
+                  }, {});
+
+                  // 2. Convertimos el objeto agrupado a un array
+                  const rawLpData = Object.keys(lpGrouped).map((key) => ({
+                    name: key,
+                    value: lpGrouped[key]
+                  }));
+
+                  // 3. Calculamos el total acumulado
+                  const totalVentasLp = rawLpData.reduce(
+                    (acc, item) => acc + (Number(item.value) || 0),
+                    0
+                  );
+
+                  // 4. Inyectamos el % de participación
+                  const lpWithPercentage = rawLpData.map((item) => {
+                    const val = Number(item.value) || 0;
+                    const pct = totalVentasLp > 0 ? ((val / totalVentasLp) * 100).toFixed(1) : '0.0';
+                    return {
+                      ...item,
+                      porcentaje: pct,
+                    };
+                  });
+
+                  // Colores de la torta
+                  const COLORES_GRAFICO = typeof COLORES_LINEA !== 'undefined' 
+                    ? COLORES_LINEA 
+                    : ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#f8f9fc', '#5a5c69'];
+
+                  return (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={lpWithPercentage}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={100}
+                          innerRadius={45} // Efecto dona/donut elegante (si deseas torta completa, cambia a 0)
+                          paddingAngle={1}
+                          isAnimationActive={false}
+                          label={({ name, porcentaje }) => `${porcentaje}%`} // Muestra el % estático sobre/al lado de la rebanada
+                          labelLine={true}
+                        >
+                          {lpWithPercentage.map((entry, index) => (
+                            <Cell
+                              key={`cell-pie-${index}`}
+                              fill={COLORES_GRAFICO[index % COLORES_GRAFICO.length]}
+                            />
+                          ))}
+                        </Pie>
+
+                        {/* Tooltip personalizado */}
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div
+                                  className="p-2 shadow-sm rounded border"
+                                  style={{
+                                    backgroundColor: 'var(--panel, #fff)',
+                                    borderColor: 'var(--line, #e0e0e0)',
+                                    fontSize: '0.85rem'
+                                  }}
+                                >
+                                  <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
+                                    {data.name}
+                                  </p>
+                                  <p className="mb-0" style={{ color: '#4e73df' }}>
+                                    Total Ventas: <strong>${Number(data.value).toLocaleString('es-CO')}</strong>
+                                  </p>
+                                  <p className="mb-0 small" style={{ color: '#6c757d' }}>
+                                    Participación: <strong>{data.porcentaje}%</strong> del total
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+
+                        {/* Leyenda en la parte inferior */}
+                        <Legend
+                          verticalAlign="bottom"
+                          height={36}
+                          iconType="circle"
+                          wrapperStyle={{ fontSize: '11px', color: 'var(--muted, #6c757d)' }}
+                        />
+                      </PieChart>
                     </ResponsiveContainer>
                   );
                 })()}
@@ -2216,24 +2424,6 @@ export default function Ventas() {
               </div>
             </div>
           </div>
-
-          {/* <div className="col">
-            <div className="panel border rounded bg-white shadow-sm p-3">
-              <h5 className="text-secondary small fw-bold mb-3">Distribución Geográfica</h5>
-              <div id="geoMap" className="chart bg-light rounded d-flex align-items-center justify-content-center" style={{ height: '250px' }}>
-                <span className="text-muted small">[Mapa: Distribución]</span>
-              </div>
-            </div>
-          </div>
-          <div className="col">
-            <div className="panel border rounded bg-white shadow-sm p-3">
-              <h5 className="text-secondary small fw-bold mb-3">Participación por Línea</h5>
-              <div id="lineShare" className="chart bg-light rounded d-flex align-items-center justify-content-center" style={{ height: '250px' }}>
-                <span className="text-muted small">[Gráfico: Participación]</span>
-              </div>
-            </div>
-          </div> */}
-
         </div>
       </div>
 
@@ -2265,6 +2455,7 @@ export default function Ventas() {
                 <th>Cantidad</th>
                 <th>Valor bruto</th>
                 <th>Márgen promedio</th>
+                <th>Lista de precio</th>
                 {/* <th>Lista de precios</th>
                 <th>U.M.</th> */}
               </tr>
@@ -2297,6 +2488,7 @@ export default function Ventas() {
                     <td>{row.cantidad}</td>
                     <td className="fw-bold text-success">${Number(row.valor || 0).toLocaleString('es-CO')}</td>
                     <td>{row.margen}</td>
+                    <td>{row.DescLp}</td>
                     {/* <td>{row.listaPrecios}</td>
                     <td>{row.um}</td> */}
                   </tr>

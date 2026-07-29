@@ -2,9 +2,9 @@ import axios from 'axios';
 
 const { config } = require('../config')
 
-const url = `${config.apiUrl2}/budget`;
+const url = `${config.apiUrl2}/margin`;
 
-export const findBudgets = async () => {
+export const findMargins = async () => {
 const token = JSON.parse(localStorage.getItem("token"))
   const { data } = await axios.get(url, {
     headers: {
@@ -14,17 +14,7 @@ const token = JSON.parse(localStorage.getItem("token"))
   return data
 }
 
-export const findBudgetsByYear = async (anio) => {
-const token = JSON.parse(localStorage.getItem("token"))
-  const { data } = await axios.get(`${url}/year/${anio}`, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  })
-  return data
-}
-
-export const findOneBudget = async (id) => {
+export const findOneMargin = async (id) => {
 const token = JSON.parse(localStorage.getItem("token"))
   const { data } = await axios.get(`${url}/${id}`,{
     headers:{
@@ -34,7 +24,7 @@ const token = JSON.parse(localStorage.getItem("token"))
   return data
 }
 
-export const createBudget = async (body) => {
+export const createMargin = async (body) => {
   const token = JSON.parse(localStorage.getItem("token"))
   const { data } = await axios.post(url, body, {
     headers: {
@@ -44,7 +34,7 @@ export const createBudget = async (body) => {
   return data
 }
 
-export const createMultipleBudget = async (body) => {
+export const createMultipleMargin = async (body) => {
   const token = JSON.parse(localStorage.getItem("token"))
   const { data } = await axios.post(`${url}/multiple`, body, {
     headers: {
@@ -54,7 +44,7 @@ export const createMultipleBudget = async (body) => {
   return data
 }
 
-export const replaceBudget = async (body) => {
+export const replaceMargin = async (body) => {
   const token = JSON.parse(localStorage.getItem("token"))
   const { data } = await axios.post(`${url}/replace`, body, {
     headers: {
@@ -64,7 +54,7 @@ export const replaceBudget = async (body) => {
   return data
 }
 
-export const updateBudget = async (id, body) => {
+export const updateMargin = async (id, body) => {
   const token = JSON.parse(localStorage.getItem("token"))
   const { data } = await axios.patch(`${url}/${id}`, body, {
     headers: {
@@ -74,17 +64,7 @@ export const updateBudget = async (id, body) => {
   return data
 }
 
-export const updateMultiple = async (body) => {
-  const token = JSON.parse(localStorage.getItem("token"))
-  const { data } = await axios.patch(`${url}`, body, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  })
-  return data
-}
-
-export const deleteBudget = async (id) => {
+export const deleteMargin = async (id) => {
   const token = JSON.parse(localStorage.getItem("token"))
   const { data } = await axios.delete(`${url}/${id}`, {
     headers: {

@@ -6,6 +6,7 @@ import Ventas from './pages/Ventas';
 import Inventario from './pages/Inventario';
 import ControlInterno from './pages/ControlInterno';
 import Presupuesto from './pages/Presupuesto';
+import Margen from './pages/Margen';
 import Page404 from "./pages/Page404";
 import Navbar from './components/Navbar';
 import PrivateRoute from "./components/PrivateRoute";
@@ -75,6 +76,7 @@ function App() {
                   <Route path='/inventario' element={<Inventario />} />
                   <Route path='/control/interno' element={<ControlInterno />} />
                   <Route path='/presupuesto' element={<Presupuesto />} />
+                  <Route path='/margen' element={<Margen />} />
                   <Route path='/administracion' element={<Users />} />
                 </Route>
 
