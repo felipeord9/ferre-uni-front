@@ -3,8 +3,8 @@ import * as XLSX from 'xlsx';
 export const downloadMarginTemplate = () => {
   // 1. Datos exactos de la plantilla basándonos en tu imagen
   const templateData = [
-    { co: "001", presupuesto: 240000000, ren_esperada: 16 },
-    { co: "002", presupuesto: 150000000, ren_esperada: 24 },
+    { co: "001", presupuesto: 240000000, ren_esperada: 16, mes: 'Enero', año: '2026' },
+    { co: "002", presupuesto: 150000000, ren_esperada: 24, mes: 'Enero', año: '2026' },
   ];
 
   // 2. Crear una nueva hoja a partir del JSON

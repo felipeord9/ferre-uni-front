@@ -68,6 +68,7 @@ export default function Margen() {
     lines: [],
     cities: [],
     years: [],
+    months: [],
   });
 
   useEffect(()=>{
@@ -82,16 +83,18 @@ export default function Margen() {
         setCurrentPage(1); 
       
         const uniqueCities = [...new Set(data.map(item => item.co).filter(Boolean))];
-        /* const uniqueYears = [...new Set(data.map(item => item.anio).filter(Boolean))]; */
+        const uniqueYears = [...new Set(data.map(item => item.anio).filter(Boolean))];
+        const uniqueMonths = [...new Set(data.map(item => item.mes).filter(Boolean))];
             
         setFilterOptions({
           cities: uniqueCities,
-          /* years: uniqueYears, */
+          years: uniqueYears,
+          months: uniqueMonths,
         });
       
-        /* if (uniqueYears.length > 0 && !uniqueYears.includes(filters.year)) {
+        if (uniqueYears.length > 0 && !uniqueYears.includes(filters.year)) {
           setFilters(prev => ({ ...prev, year: uniqueYears[0] }));
-        } */
+        }
       })
       .catch(()=>{
         console.log('error')
@@ -339,6 +342,14 @@ export default function Margen() {
     if (filters.city) {
       filtered = filtered.filter(row => row.co === filters.city);
     }
+
+    if (filters.month) {
+      filtered = filtered.filter(row => row.mes === filters.month);
+    }
+
+    if (filters.year) {
+      filtered = filtered.filter(row => row.anio === filters.year);
+    }
   
     setSuggestionsMargin(filtered);
     setCurrentPage(1);
@@ -424,13 +435,17 @@ export default function Margen() {
           const co = formatCO(row.co || row.CO || row.Cod_CO || row.punto);
           const presupuesto = parseValue(row.budget || row.BUDGET || row.presupuesto || row.monto);
           const expectedMargin = parseValue(row.ren_esperada || row.REN_ESPERADA || row.expectedMargin || row.expected_margin || row.rentabilidad);
+          const mes = formatCO(row.mes || row.MES);
+          const anio = formatCO(row.anio || row.ANIO || row.año || row.AÑO);
 
           // Validamos que al menos exista el C.O.
           if (co) {
             transformedRows.push({
               co,
               budget: presupuesto,
-              expectedMargin: expectedMargin
+              expectedMargin: expectedMargin,
+              mes,
+              anio,
             });
           }
         });
@@ -451,11 +466,19 @@ export default function Margen() {
 
         // Extraer los C.O. únicos para las opciones de filtros
         const uniqueCities = [...new Set(transformedRows.map(item => item.co).filter(Boolean))];
+        const uniqueYears = [...new Set(transformedRows.map(item => item.anio).filter(Boolean))];
+        const uniqueMonths = [...new Set(transformedRows.map(item => item.mes).filter(Boolean))];
+            
+        
+        if (uniqueYears.length > 0 && !uniqueYears.includes(filters.year)) {
+          setFilters(prev => ({ ...prev, year: uniqueYears[0] }));
+        }
 
-        setFilterOptions(prev => ({
-          ...prev,
+        setFilterOptions({
           cities: uniqueCities,
-        }));
+          years: uniqueYears,
+          months: uniqueMonths,
+        });
 
         setTimeout(() => {
           Swal.close();
@@ -602,20 +625,49 @@ export default function Margen() {
           <h2>Gestión de rentabilidad</h2>
 
           {/* Filtros */}
-
-          <div className="col-12 col-sm-6 col-md-2">
-            <label className="form-label fw-semibold small mb-1">C.O.</label>
-            <select 
-              id='city'
-              className=""
-              value={filters.city}
-              onChange={e => (
-                handleChangeFilter(e)
-              )}
-            >
-              <option value="">Todas</option>
-              {filterOptions.cities.map((c, idx) => <option key={idx} value={c}>{c}</option>)}
-            </select>
+          <div className={`${isMobile ? 'd-flex flex-column' : 'd-flex flex-row gap-2'}`}>
+            <div className="col-12 col-sm-6 col-md-4">
+              <label className="form-label fw-semibold small mb-1">C.O.</label>
+              <select 
+                id='city'
+                className=""
+                value={filters.city}
+                onChange={e => (
+                  handleChangeFilter(e)
+                )}
+              >
+                <option value="">Todas</option>
+                {filterOptions.cities.map((c, idx) => <option key={idx} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="col-12 col-sm-6 col-md-4">
+              <label className="form-label fw-semibold small mb-1">Mes</label>
+              <select 
+                id='month'
+                className=""
+                value={filters.month}
+                onChange={e => (
+                  handleChangeFilter(e)
+                )}
+              >
+                <option value="">Todos</option>
+                {filterOptions.months.map((c, idx) => <option key={idx} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="col-12 col-sm-6 col-md-4">
+              <label className="form-label fw-semibold small mb-1">Año</label>
+              <select 
+                id='year'
+                className=""
+                value={filters.year}
+                onChange={e => (
+                  handleChangeFilter(e)
+                )}
+              >
+                <option value="">Todos</option>
+                {filterOptions.years.map((c, idx) => <option key={idx} value={c}>{c}</option>)}
+              </select>
+            </div>
           </div>
 
         </div>
@@ -624,13 +676,15 @@ export default function Margen() {
       {/* tabla de margenes */}
         <div className={`table-wrap table-responsive w-100 justify-content-center align-items-center d-flex`} style={{ maxHeight: '500px', overflowY: 'auto'}}>
           {/* 1. Validamos que tengamos datos para el año seleccionado antes de mapear */}
-            <div className={` ${isMobile ? 'w-100' : 'w-50'}`}>
+            <div className={` ${isMobile ? 'w-100' : 'w-100'}`}>
               <table className="v-middle">
                 <thead>
                   <tr >
                     <th>C.O.</th>
-                    <th style={{width: '40%'}}>Presupuesto</th>
-                    <th style={{width: '40%'}}>Rentabilidad esperada</th>
+                    <th style={{textAlign: 'center'}}>Presupuesto</th>
+                    <th style={{textAlign: 'center'}}>Rentabilidad esperada</th>
+                    <th>Mes</th>
+                    <th>Año</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -646,6 +700,8 @@ export default function Margen() {
                         <td className='fw-bold'>{fila.co}</td>
                         <td className='' style={{textAlign: 'center'}}>{Number(fila.budget).toLocaleString()}</td>
                         <td className='' style={{textAlign: 'center'}}>{fila.expectedMargin} %</td>
+                        <td className='fw-bold'>{fila.mes}</td>
+                        <td className='fw-bold'>{fila.anio}</td>
                       </tr>
                     ))
                   )}

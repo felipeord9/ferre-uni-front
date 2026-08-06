@@ -14,7 +14,9 @@ export const exportMarginData = (dataList) => {
   const formattedData = dataList.map(item => ({
     co: String(item.co || '').padStart(3, '0'), // Asegura '001', '009', etc.
     presupuesto: Number(item.budget) || 0,
-    ren_esperada: Number(item.ren_esperada || item.expectedMargin) || 0
+    ren_esperada: Number(item.ren_esperada || item.expectedMargin) || 0,
+    mes: String(item.mes || ''),
+    año: String(item.mes || ''),
   }));
 
   // 2. Crear la hoja a partir del JSON limpiado

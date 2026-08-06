@@ -19,10 +19,13 @@ import {
     LabelList
 } from 'recharts';
 import * as Icons from 'lucide-react';
+import SalesPerformanceDashboard, { BulletBar } from '../../components/BulletBar';
+import MonthlyMargin from '../../components/MonthlyMargin';
 import { FiUpload } from 'react-icons/fi';
 import Select from 'react-select';
 import * as XLSX from 'xlsx';
 import Swal from 'sweetalert2';
+import SellerRankingChart from '../../components/SellerRankingChart';
 
 const COLORES_RANKING_VENDEDORES = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#6f42c1'];
 const COLORES_RANKING_CLIENTES = ['#1cc88a', '#4e73df', '#e74a3b', '#f6c23e', '#36b9cc'];
@@ -359,7 +362,9 @@ export default function Ventas() {
   const [salesData, setSalesData] = useState([]); 
   const [rawSalesData, setRawSalesData] = useState([]);
   const [yearBudget, setYearBudget] = useState(0);
+  const [yearMargin, setYearMargin] = useState(0);
   const [totalBudget, setTotalBudget] = useState([]);
+  const [totalMargin, setTotalMargin] = useState([]);
   const [isHoveredUpload, setIsHoveredUpload] = useState(false);
   const [uploadMode, setUploadMode] = useState('replace'); // 'replace' o 'append'
   const [dragActive, setDragActive] = useState(false);
@@ -401,7 +406,18 @@ export default function Ventas() {
       }, 0);
       setYearBudget(suma)
     })
-    findMargins().then(({data})=>setMarginsData(data))
+    findMargins()
+    .then(({data})=>{
+      /* setMarginsData(data) */
+      setTotalMargin(data)
+      const datosFiltrados = data.filter(item => Number(item.anio) === new Date().getFullYear());
+      const suma = datosFiltrados.reduce((acumulador, item) => {
+        const montoNumerico = Number(item.expectedMargin) || 0;
+        return acumulador + montoNumerico;
+      }, 0);
+      const result = suma / datosFiltrados.length;
+      setYearMargin(result.toFixed(2))
+    })
   },[]);
 
   const mesesConNumero = [
@@ -456,6 +472,46 @@ export default function Ventas() {
     return suma;
   };
 
+  const calculateMargin = (mesesInput, year) => {
+    // 1. Normalizar 'mesesInput' a un Array de strings limpios en mayúsculas
+    let selectedMonths = [];
+
+    if (Array.isArray(mesesInput)) {
+      selectedMonths = mesesInput
+        .map(m => (m?.value || m || '').toString().trim().toUpperCase())
+        .filter(Boolean);
+    } else if (mesesInput) {
+      const cleanStr = mesesInput.toString().trim().toUpperCase();
+      if (cleanStr) selectedMonths = [cleanStr];
+    }
+
+    // 2. Filtrar presupuestos por año
+    let datosFiltrados = totalMargin.filter(
+      item => Number(item.anio) === Number(year)
+    );
+
+    // 3. Si hay meses seleccionados, filtrar adicionalmente por esos meses
+    if (selectedMonths.length > 0) {
+      datosFiltrados = datosFiltrados.filter(item => {
+        const itemMes = item.mes ? String(item.mes).trim().toUpperCase() : '';
+        return selectedMonths.includes(itemMes);
+      });
+    }
+
+    // 4. Sumar los montos
+    const suma = datosFiltrados.reduce((acumulador, item) => {
+      const montoNumerico = Number(item.expectedMargin) || 0;
+      return acumulador + montoNumerico;
+    }, 0);
+
+    // 5. hallar la margen final
+    const result= suma / datosFiltrados.length;
+
+    // 5. Actualizar estado y retornar
+    setYearBudget(result.toFixed(2));
+    return result.toFixed(2);
+  };
+
   const parseCurrencyToNumber = (value) => {
     if (value === null || value === undefined) return 0;
     
@@ -473,7 +529,7 @@ export default function Ventas() {
   };
 
   // Función para calcular los KPIs basados en el listado actual de datos
-    const calculateKPIs = (rows, expectedMargin = 27) => {
+    const calculateKPIs = (rows, expectedMargin = yearMargin) => {
     if (!rows || rows.length === 0) {
         return { totalSales: '$0', goalProgress: '0%', invoices: '0', customers: '0', margen: '0%' };
     }
@@ -488,8 +544,9 @@ export default function Ventas() {
     const uniqueCustomers = new Set(rows.map(row => row.cliente).filter(Boolean)).size;
 
     // 4. CÁLCULO DEL MARGEN BRUTO REAL PONDERADO (%)
-    const suMargen = rows.reduce((sum, row) => sum + (parseFloat(row.margen) || 0), 0);
-    const calculateMargen = suMargen / rows.length;
+    const suMargen = calculateMargin(filters.month, filters.year)
+    /* const suMargen = rows.reduce((sum, row) => sum + (parseFloat(row.margen) || 0), 0);
+    const calculateMargen = suMargen / rows.length; */
 
     // 6. Cumplimiento Meta
     const metaEmpresa = calculateGoal(filters.month, filters.year)
@@ -497,9 +554,9 @@ export default function Ventas() {
 
     // 7. DETERMINAR ESTADO DEL SEMÁFORO
     let marginStatus = 'danger'; // Rojo si está por debajo
-    if (calculateMargen >= expectedMargin) {
+    if (suMargen >= expectedMargin) {
       marginStatus = 'success'; // Verde si alcanza o supera la meta
-    } else if (calculateMargen >= expectedMargin - 2) {
+    } else if (suMargen >= expectedMargin - 2) {
       marginStatus = 'warning'; // Amarillo (tolerancia de hasta 2% por debajo)
     }
 
@@ -508,7 +565,7 @@ export default function Ventas() {
         goalProgress: `${porcentajeMeta.toFixed(2)}%`,
         invoices: uniqueInvoices.toLocaleString('es-CO'),
         customers: uniqueCustomers.toLocaleString('es-CO'),
-        margen: `${calculateMargen.toFixed(2)}%`,
+        margen: `${suMargen}%`,
         expectedMargin: expectedMargin,
         marginStatus: marginStatus,
     };
@@ -814,16 +871,23 @@ export default function Ventas() {
     }
 
     // 🎯 5. CÁLCULO DE LA RENTABILIDAD ESPERADA (MARGEN META)
-    let expectedMargin = 27; // Valor por defecto si no hay C.O. seleccionado o hay varios
+    let expectedMargin = yearMargin; // Valor por defecto si no hay C.O. seleccionado o hay varios
 
     const selectedCities = (filters.city || []).map(c => c.value || c);
 
     if (selectedCities.length === 1) {
       const selectedCo = String(selectedCities[0]).padStart(3, '0');
-      const coMatch = marginsData.find(m => String(m.co).padStart(3, '0') === selectedCo);
+      /* const coMatch = marginsData.find(m => String(m.co).padStart(3, '0') === selectedCo); */
+
+      const datosFiltrados = totalMargin.filter(m => String(m.co).padStart(3, '0') === selectedCo);
+      const suma = datosFiltrados.reduce((acumulador, item) => {
+        const montoNumerico = Number(item.expectedMargin) || 0;
+        return acumulador + montoNumerico;
+      }, 0);
+      const result = suma / datosFiltrados.length;
       
-      if (coMatch && coMatch.expectedMargin) {
-        expectedMargin = parseFloat(coMatch.expectedMargin);
+      if (result) {
+        expectedMargin = parseFloat(result.toFixed(2));
       }
     }
 
@@ -1117,7 +1181,7 @@ export default function Ventas() {
     }));
   };
 
-  // Memorizamos los datos combinados para rendimiento
+    // Memorizamos los datos combinados para rendimiento
   const chartData = useMemo(() => {
     if (filters.month && filters.month.length === 1) {
       return compareCoVsBudget(salesData, totalBudget, filters.year, filters.month[0]);
@@ -1125,6 +1189,464 @@ export default function Ventas() {
       return getCompareData(salesData, totalBudget, filters.year);
     }
   }, [salesData, totalBudget, filters.year, filters.month]);
+
+  // procesar datos para el grafico ventas vs margen por CO
+  const compareCoVsMargin = (salesRows, marginRows, selectedYear, selectedMonthFilter) => {
+    // Lista Maestra de Centros de Operación
+    const nombresCo = ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "020", "100"];
+
+    const nombresMesesLargos = [
+      "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+      "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+    ];
+
+    const salesByCo = {};
+    const utilityByCo = {};
+    const budgetByCo = {};
+    const expectedMarginByCo = {};
+
+    // --- 1. RESOLVER EL MES Y NÚMERO DE MES SELECCIONADO ---
+    const rawMonthVal = selectedMonthFilter?.value || (Array.isArray(selectedMonthFilter) ? selectedMonthFilter[0] : selectedMonthFilter);
+    
+    let targetMonthNum = null;
+    let targetMonthName = null;
+
+    if (rawMonthVal) {
+      const rawStr = String(rawMonthVal?.value || rawMonthVal).trim().toUpperCase();
+      const parsedNum = parseInt(rawStr, 10);
+
+      if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+        targetMonthNum = parsedNum;
+        targetMonthName = nombresMesesLargos[parsedNum - 1];
+      } else {
+        const foundIdx = nombresMesesLargos.findIndex(m => m.startsWith(rawStr) || rawStr.startsWith(m));
+        if (foundIdx !== -1) {
+          targetMonthNum = foundIdx + 1;
+          targetMonthName = nombresMesesLargos[foundIdx];
+        }
+      }
+    }
+
+    // Helper para formato C.O. a 3 dígitos (ej: 1 -> "001")
+    const formatCo = (coValue) => {
+      if (!coValue) return "";
+      return String(coValue).trim().padStart(3, '0');
+    };
+
+    // --- 2. PROCESAR VENTAS Y UTILIDAD REAL (Filtrando por Año y Mes) ---
+    if (salesRows && salesRows.length > 0) {
+      salesRows.forEach(row => {
+        if (!row.date) return;
+        const parts = row.date.split('/');
+        if (parts.length === 3) {
+          const rowMonth = parseInt(parts[1], 10);
+          const rowYear = parts[2];
+
+          // Validamos el año y el mes (si hay mes seleccionado)
+          const matchYear = !selectedYear || String(rowYear) === String(selectedYear);
+          const matchMonth = !targetMonthNum || rowMonth === targetMonthNum;
+
+          if (matchYear && matchMonth) {
+            const coKey = formatCo(row.co || row.CO);
+            if (coKey) {
+              const valor = Number(row.valor || row.subtotal) || 0;
+              // Parse de margen (ej: "15,5" o 15.5 -> 15.5)
+              const margenPct = parseFloat(String(row.margen || '0').replace(',', '.')) || 0;
+
+              salesByCo[coKey] = (salesByCo[coKey] || 0) + valor;
+              // Utilidad acumulada = Venta * (% Margen / 100)
+              utilityByCo[coKey] = (utilityByCo[coKey] || 0) + (valor * (margenPct / 100));
+            }
+          }
+        }
+      });
+    }
+
+    // --- 3. PROCESAR METAS Y PRESUPUESTOS DE LA TABLA DE MÁRGENES ---
+    if (marginRows && marginRows.length > 0) {
+      marginRows.forEach(item => {
+        const coKey = formatCo(item.co || item.CO || item.punto);
+        if (coKey) {
+          const presupuesto = Number(item.budget || item.presupuesto) || 0;
+          const renEsperada = parseFloat(String(item.expectedMargin || item.ren_esperada || 0).replace(',', '.')) || 0;
+
+          budgetByCo[coKey] = presupuesto;
+          expectedMarginByCo[coKey] = renEsperada;
+        }
+      });
+    }
+
+    // --- 4. UNIFICAR RESULTADOS Y CALCULAR PORCENTAJES PONDERADOS Y CUMPLIMIENTOS ---
+    return nombresCo.map(co => {
+      const totalVentas = Math.round(salesByCo[co] || 0);
+      const totalUtilidad = utilityByCo[co] || 0;
+      
+      // Margen Ponderado Real %
+      const margenRealPct = totalVentas > 0 ? (totalUtilidad / totalVentas) * 100 : 0;
+      
+      // Metas cargadas
+      const metaPresupuesto = budgetByCo[co] || 0;
+      const metaRentabilidad = expectedMarginByCo[co] || 27; // 27% por defecto si no existe
+
+      // Cumplimientos % (Semiautómaticos para semáforo)
+      const cumplimientoVentasPct = metaPresupuesto > 0 ? (totalVentas / metaPresupuesto) * 100 : 0;
+      const cumplimientoMargenPct = metaRentabilidad > 0 ? (margenRealPct / metaRentabilidad) * 100 : 0;
+
+      return {
+        co: co,
+        nombre: `${co}`,
+        ventas: totalVentas,
+        metaVentas: metaPresupuesto,
+        cumplimientoVentasPct: Number(cumplimientoVentasPct.toFixed(2)),
+        rentabilidad: Number(margenRealPct.toFixed(2)),
+        metaRentabilidad: metaRentabilidad,
+        cumplimientoMargenPct: Number(cumplimientoMargenPct.toFixed(2))
+      };
+    });
+  };
+
+  //funcion para calcular la margen por mes
+  const getMarginCompareData = (salesRows, marginRows, selectedYear) => {
+    // Nombres cortos para las etiquetas del gráfico/tabla
+    const nombresMesesCortos = [
+      "Ene", "Feb", "Mar", "Abr", "May", "Jun", 
+      "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"
+    ];
+
+    // Nombres completos en MAYÚSCULAS para emparejar con item.mes del presupuesto/metas
+    const nombresMesesLargos = [
+      "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+      "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+    ];
+
+    const salesByMonth = {};
+    const utilityByMonth = {};
+    const budgetByMonth = {};
+    const expectedMarginByMonth = {};
+
+    // 1. Procesar Ventas y Utilidad Real (Acumula por índice de mes 0-11)
+    if (salesRows && salesRows.length > 0) {
+      salesRows.forEach(row => {
+        if (!row.date) return;
+        const parts = row.date.split('/');
+        if (parts.length === 3) {
+          const rowYear = parts[2];
+          if (String(rowYear) === String(selectedYear)) {
+            const rowMonth = parseInt(parts[1], 10) - 1; // Base 0 (0 a 11)
+            
+            if (rowMonth >= 0 && rowMonth <= 11) {
+              const valor = Number(row.valor || row.subtotal) || 0;
+              // Parse del margen (soporta decimales con coma o punto)
+              const margenPct = parseFloat(String(row.margen || '0').replace(',', '.')) || 0;
+
+              salesByMonth[rowMonth] = (salesByMonth[rowMonth] || 0) + valor;
+              // Utilidad bruta acumulada para cálculo de margen ponderado
+              utilityByMonth[rowMonth] = (utilityByMonth[rowMonth] || 0) + (valor * (margenPct / 100));
+            }
+          }
+        }
+      });
+    }
+
+    // 2. Procesar Metas y Presupuestos por Mes (Acumula por Nombre en Mayúsculas: "ENERO", "FEBRERO"...)
+    if (marginRows && marginRows.length > 0) {
+      marginRows.forEach(item => {
+        const itemAnio = item.anio || item.year || selectedYear;
+        if (String(itemAnio) === String(selectedYear)) {
+          const monthName = item.mes ? item.mes.trim().toUpperCase() : null;
+          const presupuesto = Number(item.monto || item.presupuesto || item.budget) || 0;
+          const renEsperada = parseFloat(String(item.expectedMargin || item.ren_esperada || item.rentabilidad || 0).replace(',', '.')) || 0;
+
+          if (monthName) {
+            budgetByMonth[monthName] = (budgetByMonth[monthName] || 0) + presupuesto;
+            // Si hay varias filas del mismo mes, guardamos/promediamos la rentabilidad esperada
+            if (renEsperada > 0) {
+              expectedMarginByMonth[monthName] = renEsperada;
+            }
+          }
+        }
+      });
+    }
+
+    // 3. Unificar ambos flujos cruzando los 12 meses
+    return nombresMesesCortos.map((shortName, index) => {
+      const fullName = nombresMesesLargos[index]; // Obtenemos "ENERO" para index 0, "FEBRERO" para index 1, etc.
+
+      const totalVentas = Math.round(salesByMonth[index] || 0);
+      const totalUtilidad = utilityByMonth[index] || 0;
+
+      // Margen Ponderado Real % del mes
+      const margenRealPct = totalVentas > 0 ? (totalUtilidad / totalVentas) * 100 : 0;
+
+      // Metas del mes
+      const metaPresupuesto = Math.round(budgetByMonth[fullName] || 0);
+      const metaRentabilidad = expectedMarginByMonth[fullName] || 27; // 27% por defecto si no se especifica en la tabla
+
+      // Cumplimientos %
+      const cumplimientoVentasPct = metaPresupuesto > 0 ? (totalVentas / metaPresupuesto) * 100 : 0;
+      const cumplimientoMargenPct = metaRentabilidad > 0 ? (margenRealPct / metaRentabilidad) * 100 : 0;
+
+      return {
+        name: shortName,                          // "Ene", "Feb", etc.
+        fullName: fullName,                       // "ENERO", "FEBRERO", etc.
+        Ventas: totalVentas,                      // Venta real acumulada $
+        Presupuesto: metaPresupuesto,             // Presupuesto meta $
+        cumplimientoVentasPct: Number(cumplimientoVentasPct.toFixed(2)),
+        Rentabilidad: Number(margenRealPct.toFixed(2)), // Margen ponderado real %
+        MetaRentabilidad: metaRentabilidad,             // Rentabilidad meta %
+        cumplimientoMargenPct: Number(cumplimientoMargenPct.toFixed(2))
+      };
+    });
+  };
+
+  // Memorizamos los datos combinados para rendimiento
+  const chartMargin = useMemo(() => {
+    if (filters.month && filters.month.length === 1) {
+      return compareCoVsMargin(salesData, totalMargin, filters.year, filters.month[0]);
+    } else if(filters.month && filters.month.length === 0 || filters.month && filters.month.length > 1){
+      return getMarginCompareData(salesData, totalMargin, filters.year);
+    }
+  }, [salesData, totalMargin, filters.year, filters.month]);
+
+  // funcion para sacar el ranking de presupuesto por seller
+  const getSellerRankingWithBudget = (
+    salesRows = [], 
+    budgetRows = [], 
+    selectedYear = '', 
+    selectedMonth = ''
+  ) => {
+    // Nombres de meses para mapear si selectedMonth viene como número (1-12) o texto
+    const nombresMeses = [
+      "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+      "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+    ];
+
+    // Determinar el nombre del mes a filtrar si se especifica un mes
+    let targetMonthName = null;
+    if (selectedMonth) {
+      if (!isNaN(selectedMonth)) {
+        const monthIdx = parseInt(selectedMonth, 10) - 1;
+        if (monthIdx >= 0 && monthIdx < 12) {
+          targetMonthName = nombresMeses[monthIdx];
+        }
+      } else {
+        targetMonthName = String(selectedMonth).trim().toUpperCase();
+      }
+    }
+
+    const salesBySeller = {};
+    const budgetBySeller = {};
+    const marginStatsBySeller = {};
+
+    // 1. PROCESAR VENTAS REALES
+    if (salesRows && salesRows.length > 0) {
+      salesRows.forEach(row => {
+        // Validar Filtro de Año y Mes según la fecha "DD/MM/YYYY" o campo date
+        if (row.date) {
+          const parts = row.date.split('/');
+          if (parts.length === 3) {
+            const rowYear = parts[2];
+            const rowMonthIdx = parseInt(parts[1], 10) - 1;
+
+            // Filtrar por Año si está seleccionado
+            if (selectedYear && String(rowYear) !== String(selectedYear)) return;
+
+            // Filtrar por Mes si está seleccionado
+            if (targetMonthName && nombresMeses[rowMonthIdx] !== targetMonthName) return;
+          }
+        }
+
+        // Nombre del Vendedor (soporta varios nombres de propiedad habituales)
+        const sellerName = (
+          row.rzsVendedor || 
+          row.vendedor || 
+          row.nombreVendedor || 
+          'SIN VENDEDOR'
+        ).trim().toUpperCase();
+
+        const montoVenta = Number(row.valor || row.subtotal || row.monto) || 0;
+        salesBySeller[sellerName] = (salesBySeller[sellerName] || 0) + montoVenta;
+
+        const valMargen = Number(row.margen);
+        if (!isNaN(valMargen)) {
+          if (!marginStatsBySeller[sellerName]) {
+            marginStatsBySeller[sellerName] = { suma: 0, cantidad: 0 };
+          }
+          marginStatsBySeller[sellerName].suma += valMargen;
+          marginStatsBySeller[sellerName].cantidad += 1;
+        }
+      });
+    }
+
+    // 2. PROCESAR PRESUPUESTO (totalBudget)
+    if (budgetRows && budgetRows.length > 0) {
+      budgetRows.forEach(item => {
+        // Filtrar por Año
+        if (selectedYear && String(item.anio) !== String(selectedYear)) return;
+
+        // Filtrar por Mes ("ENERO", "FEBRERO", etc.)
+        const itemMes = item.mes ? item.mes.trim().toUpperCase() : '';
+        if (targetMonthName && itemMes !== targetMonthName) return;
+
+        // Obtener el Vendedor desde rzsVendedor
+        const sellerName = (item.rzsVendedor || 'SIN VENDEDOR').trim().toUpperCase();
+        const montoPresupuesto = Number(item.monto) || 0;
+
+        budgetBySeller[sellerName] = (budgetBySeller[sellerName] || 0) + montoPresupuesto;
+      });
+    }
+
+    // 3. UNIFICAR TODOS LOS VENDEDORES (Tanto de Ventas como de Presupuesto)
+    const allSellers = Array.from(
+      new Set([...Object.keys(salesBySeller), ...Object.keys(budgetBySeller)])
+    );
+
+    // 4. MAPEAR Y ORDENAR TOP 10 DE VENTAS
+    return allSellers
+      .map(seller => {
+        const ventas = Math.round(salesBySeller[seller] || 0);
+        const presupuesto = Math.round(budgetBySeller[seller] || 0);
+
+        // Cálculo del promedio simple: suma de márgenes / número de registros
+        const stats = marginStatsBySeller[seller];
+        const rentabilidad = (stats && stats.cantidad > 0)
+          ? (stats.suma / stats.cantidad).toFixed(1)
+          : '0.0';
+
+        return {
+          name: seller,
+          Ventas: ventas,
+          Presupuesto: presupuesto,
+          rentabilidad: rentabilidad // Guarda el margen promedio calculado directamente
+        };
+      })
+      .sort((a, b) => b.Ventas - a.Ventas);
+    /* const ranking = allSellers.map(seller => {
+      // Convertir nombre a Formato Título para mejor presentación en el gráfico ("MORALES IVONNE" -> "Morales Ivonne")
+      const formattedName = seller
+        .toLowerCase()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+
+      return {
+        name: formattedName,
+        rawSellerName: seller,
+        Ventas: Math.round(salesBySeller[seller] || 0),
+        Presupuesto: Math.round(budgetBySeller[seller] || 0)
+      };
+    });
+
+    // Ordenar de mayor a menor por Ventas y retornar únicamente los primeros 10
+    return ranking
+      .sort((a, b) => b.Ventas - a.Ventas)
+      .slice(0, 10); */
+  };
+
+  //funcion para sacar ventas y presupuesto por linea de producto
+  const getLineShareWithBudgetData = (
+    salesRows = [], 
+    budgetRows = [], 
+    selectedYear = '', 
+    selectedMonth = ''
+  ) => {
+    const nombresMeses = [
+      "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+      "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+    ];
+
+    let targetMonthName = null;
+    if (selectedMonth) {
+      if (!isNaN(selectedMonth)) {
+        const monthIdx = parseInt(selectedMonth, 10) - 1;
+        if (monthIdx >= 0 && monthIdx < 12) targetMonthName = nombresMeses[monthIdx];
+      } else {
+        targetMonthName = String(selectedMonth).trim().toUpperCase();
+      }
+    }
+
+    const salesByLine = {};
+    const budgetByLine = {};
+    
+    // Objeto para almacenar la suma de los márgenes y la cantidad de registros por línea
+    const marginStatsByLine = {};
+
+    // 1. Acumular Ventas y Promediar el campo "margen"
+    if (salesRows && salesRows.length > 0) {
+      salesRows.forEach(row => {
+        if (row.date) {
+          const parts = row.date.split('/');
+          if (parts.length === 3) {
+            const rowYear = parts[2];
+            const rowMonthIdx = parseInt(parts[1], 10) - 1;
+            if (selectedYear && String(rowYear) !== String(selectedYear)) return;
+            if (targetMonthName && nombresMeses[rowMonthIdx] !== targetMonthName) return;
+          }
+        }
+
+        const lineName = (
+          row.descripLinea || 
+          row.linea || 
+          row.lineaProducto || 
+          'OTRAS LÍNEAS'
+        ).trim().toUpperCase();
+
+        const montoVenta = Number(row.valor || row.subtotal || row.monto) || 0;
+        salesByLine[lineName] = (salesByLine[lineName] || 0) + montoVenta;
+
+        // Extraer y acumular la columna de margen guardada como row.margen
+        const valMargen = Number(row.margen);
+        if (!isNaN(valMargen)) {
+          if (!marginStatsByLine[lineName]) {
+            marginStatsByLine[lineName] = { suma: 0, cantidad: 0 };
+          }
+          marginStatsByLine[lineName].suma += valMargen;
+          marginStatsByLine[lineName].cantidad += 1;
+        }
+      });
+    }
+
+    // 2. Acumular Presupuesto por descripLinea
+    if (budgetRows && budgetRows.length > 0) {
+      budgetRows.forEach(item => {
+        if (selectedYear && String(item.anio) !== String(selectedYear)) return;
+
+        const itemMes = item.mes ? item.mes.trim().toUpperCase() : '';
+        if (targetMonthName && itemMes !== targetMonthName) return;
+
+        const lineName = (item.descripLinea || 'OTRAS LÍNEAS').trim().toUpperCase();
+        const montoPresupuesto = Number(item.monto) || 0;
+
+        budgetByLine[lineName] = (budgetByLine[lineName] || 0) + montoPresupuesto;
+      });
+    }
+
+    // 3. Consolidar todas las líneas encontradas
+    const allLines = Array.from(
+      new Set([...Object.keys(salesByLine), ...Object.keys(budgetByLine)])
+    );
+
+    // 4. Mapear, promediar el margen y ordenar por ventas
+    return allLines
+      .map(line => {
+        const ventas = Math.round(salesByLine[line] || 0);
+        const presupuesto = Math.round(budgetByLine[line] || 0);
+
+        // Cálculo del promedio simple: suma de márgenes / número de registros
+        const stats = marginStatsByLine[line];
+        const rentabilidad = (stats && stats.cantidad > 0)
+          ? (stats.suma / stats.cantidad).toFixed(1)
+          : '0.0';
+
+        return {
+          name: line,
+          Ventas: ventas,
+          Presupuesto: presupuesto,
+          rentabilidad: rentabilidad // Guarda el margen promedio calculado directamente
+        };
+      })
+      .sort((a, b) => b.Ventas - a.Ventas);
+  };
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -1625,7 +2147,7 @@ export default function Ventas() {
             <div className="col">
               <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
                 <h5 className="small fw-bold mb-3">Comparativa Mensual de Ventas</h5>
-                <div style={{ width: '100%', height: '280px' }}>
+                <div style={{ width: '100%', height: '380px' }}>
                   {salesData.length === 0 ? (
                     <div className="h-100 d-flex align-items-center justify-content-center rounded small">
                       Sin datos - Cargue un archivo
@@ -1730,7 +2252,7 @@ export default function Ventas() {
           
 
           {/* Grafico de Ventas por presupuesto */}
-          {filters.month.length === 1 ?
+{/*           {filters.month.length === 1 ?
             <div className="col">
               <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-2'}`}>
                 <div className="d-flex justify-content-between align-items-center mb-3">
@@ -1776,7 +2298,6 @@ export default function Ventas() {
                             tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
                           />
                           
-                          {/* 2. Tooltip Enriquecido con Cumplimiento */}
                           <Tooltip 
                             content={({ active, payload, label }) => {
                               if (active && payload && payload.length) {
@@ -1815,7 +2336,6 @@ export default function Ventas() {
                           
                           <Legend verticalAlign="top" height={36} iconType="circle" />
                           
-                          {/* 3. Barra de Ventas con el % arriba */}
                           <Bar 
                             dataKey="Ventas" 
                             fill="#4e73df" 
@@ -1830,8 +2350,7 @@ export default function Ventas() {
                               style={{ fill: 'var(--ink, #4e73df)', fontSize: '10px', fontWeight: 'bold' }}
                             />
                           </Bar>
-                          
-                          {/* Barra de Presupuesto */}
+
                           <Bar 
                             dataKey="Presupuesto" 
                             fill="#1cc88a" 
@@ -1893,7 +2412,6 @@ export default function Ventas() {
                             tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
                           />
                           
-                          {/* Tooltip dinámico con indicador de meta */}
                           <Tooltip 
                             content={({ active, payload, label }) => {
                               if (active && payload && payload.length) {
@@ -1932,7 +2450,6 @@ export default function Ventas() {
                           
                           <Legend verticalAlign="top" height={36} iconType="circle" />
                           
-                          {/* Barra de Ventas con etiqueta % arriba */}
                           <Bar 
                             dataKey="Ventas" 
                             fill="#4e73df" 
@@ -1940,15 +2457,17 @@ export default function Ventas() {
                             maxBarSize={40}
                             isAnimationActive={false}
                           >
-                            <LabelList 
-                              dataKey="cumplimiento" 
-                              position="top" 
-                              formatter={(val) => `${val}%`}
-                              style={{ fill: 'var(--ink, #4e73df)', fontSize: '10px', fontWeight: 'bold' }}
+                            <LabelList
+                              dataKey="Ventas"
+                              position="top"
+                              formatter={(val) => {
+                                const num = Number(val) || 0;
+                                return `$${(num / 1000000).toLocaleString('es-CO', { maximumFractionDigits: 1 })}M`;
+                              }}
+                              style={{ fill: '#1e40af', fontSize: '10px', fontWeight: 'bold' }}
                             />
                           </Bar>
                           
-                          {/* Barra de Presupuesto */}
                           <Bar 
                             dataKey="Presupuesto" 
                             fill="#1cc88a" 
@@ -1963,10 +2482,42 @@ export default function Ventas() {
                 </div>
               </div>
             </div>
-          }
+          } */}
+
+          {/* Grafico ventas por rentabilidad (margen) */}
+          <div className="col">
+            {filters.month.length === 1 ?
+              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`} style={{height: '447px', overflowY: 'auto'}}>
+                {salesData.length === 0 ? (
+                  <div className='d-flex h-100 flex-column'>
+                    <h5 className="small fw-bold mb-3">Comparativa Ventas Vs Rentabilidad Por C.O.</h5>
+                    <div className="h-100 d-flex align-items-center justify-content-center rounded small">
+                      Sin datos - Cargue un archivo
+                    </div>
+                  </div>
+                ):(
+                  <SalesPerformanceDashboard performanceData={chartMargin} />
+                )}
+              </div>
+              :
+              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`} style={{height: '447px', overflowY: 'auto'}}>
+                {salesData.length === 0 ? (
+                  <div className='d-flex h-100 flex-column'>
+                    <h5 className="small fw-bold mb-3">Comparativa Ventas Vs Rentabilidad ({new Date().getFullYear()})</h5>
+                    <div className="h-100 d-flex align-items-center justify-content-center rounded small">
+                      Sin datos - Cargue un archivo
+                    </div>
+                  </div>
+                ):(
+                  <MonthlyMargin monthlyCompareData={chartMargin} />
+                )}
+              </div>
+            }
+          </div>
 
           {/* Ranking por vendedor */}
-          <div className="col">
+          <SellerRankingChart salesData={salesData} totalBudget={totalBudget} getSellerRankingWithBudget={getSellerRankingWithBudget} filters={filters} />
+          {/* <div className="col">
             <div className="panel rounded shadow-sm p-3">
               <h5 className="small fw-bold mb-3">Ranking de Vendedores (Top 10)</h5>
               <div style={{ width: '100%', height: '380px' }}>
@@ -1997,31 +2548,30 @@ export default function Ventas() {
                   return (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        layout="vertical"
+                        layout="horizontal"
                         data={rankingWithPercentage}
-                        margin={{ top: 5, right: 60, left: 20, bottom: 5 }}
+                        margin={{ top: 25, right: 20, left: 10, bottom: 45 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--line, #f0f0f0)" />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line, #f0f0f0)" />
                         
-                        {/* Eje X: Numérico en millones */}
                         <XAxis 
-                          type="number" 
-                          tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
-                          stroke="var(--muted, #6c757d)" 
-                          fontSize={12} 
-                          domain={[0, (dataMax) => dataMax * 1.15]}
-                        />
-                        
-                        {/* Eje Y: Nombres de los vendedores */}
-                        <YAxis 
                           dataKey="name" 
                           type="category" 
                           stroke="var(--muted, #6c757d)" 
                           fontSize={11} 
-                          width={80} 
+                          interval={0}
+                          angle={-35}
+                          textAnchor="end"
                         />
                         
-                        {/* Tooltip con total y porcentaje */}
+                        <YAxis 
+                          type="number" 
+                          tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
+                          stroke="var(--muted, #6c757d)" 
+                          fontSize={11} 
+                          domain={[0, (dataMax) => dataMax * 1.15]}
+                        />
+                        
                         <Tooltip 
                           content={({ active, payload, label }) => {
                             if (active && payload && payload.length) {
@@ -2051,14 +2601,12 @@ export default function Ventas() {
                           }}
                         />
                         
-                        {/* Barra de Ventas Horizontales */}
                         <Bar 
                           dataKey="Ventas" 
-                          radius={[0, 4, 4, 0]} 
-                          barSize={18}
+                          radius={[4, 4, 0, 0]} 
+                          barSize={24}
                           isAnimationActive={false}
                         >
-                          {/* Celdas de colores */}
                           {rankingWithPercentage.map((entry, index) => (
                             <Cell 
                               key={`cell-${index}`} 
@@ -2066,16 +2614,15 @@ export default function Ventas() {
                             />
                           ))}
 
-                          {/* 🎯 ETIQUETA A LA DERECHA: Total Ventas formateado a Millones ($115M) */}
                           <LabelList 
                             dataKey="Ventas" 
-                            position="right"
-                            dx={8}
+                            position="top"
+                            dy={-10}
                             formatter={(val) => {
                               const num = Number(val) || 0;
                               return `$${(num / 1000000).toLocaleString('es-CO', { maximumFractionDigits: 1 })}M`;
                             }}
-                            style={{ fill: '#6c757d', fontSize: '11px', fontWeight: 'bold' }}
+                            style={{ fill: '#6c757d', fontSize: '10px', fontWeight: 'bold' }}
                           />
                         </Bar>
                       </BarChart>
@@ -2084,7 +2631,7 @@ export default function Ventas() {
                 })()}
               </div>
             </div>
-          </div>
+          </div> */}
           
           {/* Ranking por cliente */}
           <div className="col">
@@ -2195,7 +2742,7 @@ export default function Ventas() {
             </div>
           </div>
 
-          {/* Ventas por lista de precio */}
+          {/* Grafico Ventas por lista de precio */}
           <div className="col">
             <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
               <h5 className="small fw-bold mb-3">Ventas por Lista de Precio</h5>
@@ -2239,10 +2786,19 @@ export default function Ventas() {
                     };
                   });
 
-                  // Colores de la torta
-                  const COLORES_GRAFICO = typeof COLORES_LINEA !== 'undefined' 
-                    ? COLORES_LINEA 
-                    : ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#f8f9fc', '#5a5c69'];
+                  // 🎯 NUEVA PALETA DE 10 COLORES (Estilo Neón/Moderno Dashboard)
+                  const COLORES_GRAFICO = [
+                    '#0284c7', // Azul Ciel / Sky Blue
+                    '#e11d48', // Coral Red / Carmín
+                    '#059669', // Verde Esmeralda Oscuro
+                    '#d97706', // Ámbar Cálido
+                    '#7c3aed', // Violeta Eléctrico
+                    '#0d9488', // Teal / Azul Verdoso
+                    '#db2777', // Fucsia
+                    '#65a30d', // Verde Lima
+                    '#4f46e5', // Indigo Neón
+                    '#475569'  // Pizarra Oscuro
+                  ];
 
                   return (
                     <ResponsiveContainer width="100%" height="100%">
@@ -2254,10 +2810,10 @@ export default function Ventas() {
                           cx="50%"
                           cy="50%"
                           outerRadius={100}
-                          innerRadius={45} // Efecto dona/donut elegante (si deseas torta completa, cambia a 0)
+                          innerRadius={45}
                           paddingAngle={1}
                           isAnimationActive={false}
-                          label={({ name, porcentaje }) => `${porcentaje}%`} // Muestra el % estático sobre/al lado de la rebanada
+                          label={({ porcentaje }) => `${porcentaje}%`}
                           labelLine={true}
                         >
                           {lpWithPercentage.map((entry, index) => (
@@ -2285,7 +2841,134 @@ export default function Ventas() {
                                   <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
                                     {data.name}
                                   </p>
-                                  <p className="mb-0" style={{ color: '#4e73df' }}>
+                                  <p className="mb-0" style={{ color: '#0284c7' }}>
+                                    Total Ventas: <strong>${Number(data.value).toLocaleString('es-CO')}</strong>
+                                  </p>
+                                  <p className="mb-0 small" style={{ color: '#6c757d' }}>
+                                    Participación: <strong>{data.porcentaje}%</strong> del total
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+
+                        {/* Leyenda en la parte inferior */}
+                        <Legend
+                          verticalAlign="bottom"
+                          height={36}
+                          iconType="circle"
+                          wrapperStyle={{ fontSize: '11px', color: 'var(--muted, #6c757d)' }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* Ventas por tipo de cliente */}
+          <div className="col">
+            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
+              <h5 className="small fw-bold mb-3">Ventas por Tipo de cliente</h5>
+              <div style={{ width: '100%', height: '380px' }}>
+                {salesData.length === 0 ? (
+                  <div className="h-100 d-flex align-items-center justify-content-center rounded small">
+                    Sin datos - Cargue un archivo
+                  </div>
+                ) : (() => {
+                  // 1. Agrupamos los datos de ventas por "typeClient"
+                  const lpGrouped = salesData.reduce((acc, curr) => {
+                    const lpName = curr.typeClient || curr.type_client || 'Sola / Sin Lista';
+                    const valor = Number(curr.monto || curr.valor || curr.total || 0);
+
+                    if (!acc[lpName]) {
+                      acc[lpName] = 0;
+                    }
+                    acc[lpName] += valor;
+                    return acc;
+                  }, {});
+
+                  // 2. Convertimos el objeto agrupado a un array
+                  const rawLpData = Object.keys(lpGrouped).map((key) => ({
+                    name: key,
+                    value: lpGrouped[key]
+                  }));
+
+                  // 3. Calculamos el total acumulado
+                  const totalVentasLp = rawLpData.reduce(
+                    (acc, item) => acc + (Number(item.value) || 0),
+                    0
+                  );
+
+                  // 4. Inyectamos el % de participación
+                  const lpWithPercentage = rawLpData.map((item) => {
+                    const val = Number(item.value) || 0;
+                    const pct = totalVentasLp > 0 ? ((val / totalVentasLp) * 100).toFixed(1) : '0.0';
+                    return {
+                      ...item,
+                      porcentaje: pct,
+                    };
+                  });
+
+                  // 🎯 PALETA DE 10 COLORES DE ALTO CONTRASTE
+                  const COLORES_GRAFICO = [
+                    '#2563eb', // Azul Royal
+                    '#10b981', // Verde Esmeralda
+                    '#f59e0b', // Ámbar / Naranja cálido
+                    '#8b5cf6', // Púrpura
+                    '#ec4899', // Rosa Intenso
+                    '#06b6d4', // Cían / Turquesa
+                    '#f97316', // Naranja Vivo
+                    '#14b8a6', // Menta / Teal
+                    '#6366f1', // Indigo
+                    '#64748b'  // Gris Pizarra
+                  ];
+
+                  return (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={lpWithPercentage}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={100}
+                          innerRadius={45}
+                          paddingAngle={1}
+                          isAnimationActive={false}
+                          label={({ porcentaje }) => `${porcentaje}%`}
+                          labelLine={true}
+                        >
+                          {lpWithPercentage.map((entry, index) => (
+                            <Cell
+                              key={`cell-pie-${index}`}
+                              fill={COLORES_GRAFICO[index % COLORES_GRAFICO.length]}
+                            />
+                          ))}
+                        </Pie>
+
+                        {/* Tooltip personalizado */}
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div
+                                  className="p-2 shadow-sm rounded border"
+                                  style={{
+                                    backgroundColor: 'var(--panel, #fff)',
+                                    borderColor: 'var(--line, #e0e0e0)',
+                                    fontSize: '0.85rem'
+                                  }}
+                                >
+                                  <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
+                                    {data.name}
+                                  </p>
+                                  <p className="mb-0" style={{ color: '#2563eb' }}>
                                     Total Ventas: <strong>${Number(data.value).toLocaleString('es-CO')}</strong>
                                   </p>
                                   <p className="mb-0 small" style={{ color: '#6c757d' }}>
@@ -2314,114 +2997,134 @@ export default function Ventas() {
           </div>
 
           {/* Ventas por linea */}
-          <div className="col w-100">
-            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
-              <h5 className="small fw-bold mb-3">Participación por Línea de Producto</h5>
-              <div style={{ width: '100%', height: '350px' }}>
-                {salesData.length === 0 ? (
-                  <div className="h-100 d-flex align-items-center justify-content-center rounded small">
-                    Sin datos - Cargue un archivo
-                  </div>
-                ) : (() => {
-                  // 1. Obtenemos la data base de las líneas de producto
-                  const rawLineData = getLineShareData(salesData);
+          <div className="col">
+            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-2'}`}>              
+              <h5 className="small fw-bold mb-3">Ventas por Línea de producto</h5>
+              {salesData.length === 0 ? (
+                <div className="d-flex align-items-center justify-content-center rounded small" style={{ height: '300px' }}>
+                  Sin datos - Cargue un archivo
+                </div>
+              ) : (() => {
+                // 1. Obtener la data con Ventas, Presupuesto y Margen Promedio (rentabilidad)
+                const rawLineData = getLineShareWithBudgetData(salesData, totalBudget, filters.year, filters.month);
 
-                  // 2. Calculamos el total acumulado de todas las líneas
-                  const totalVentasLineas = rawLineData.reduce(
-                    (acc, item) => acc + (Number(item.value) || 0), 
-                    0
-                  );
+                // 2. Procesar los indicadores por cada producto/línea
+                const tableData = rawLineData.map((item) => {
+                  const ventas = Number(item.Ventas) || 0;
+                  const presupuesto = Number(item.Presupuesto) || 0;
+                  const rentabilidad = Number(item.rentabilidad) || 0;
 
-                  // 3. Inyectamos el % de participación de cada línea
-                  const lineWithPercentage = rawLineData.map((item) => {
-                    const val = Number(item.value) || 0;
-                    const pct = totalVentasLineas > 0 ? ((val / totalVentasLineas) * 100).toFixed(1) : '0.0';
-                    return {
-                      ...item,
-                      porcentaje: pct, // Ej: "24.5"
-                    };
-                  });
+                  const cumplimiento = presupuesto > 0 ? (ventas / presupuesto) * 100 : 0;
 
-                  return (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={lineWithPercentage}
-                        margin={{ top: 30, right: 30, left: 20, bottom: 60 }} // top: 30 deja espacio para la etiqueta estática
-                      >
-                        {/* Líneas de guía tenues */}
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line, #f0f0f0)" />
-                        
-                        {/* Eje X (Nombres de las Líneas) */}
-                        <XAxis 
-                          dataKey="name" 
-                          tick={{ fontSize: 11, fill: 'var(--muted, #6c757d)' }}
-                          interval={0}
-                          angle={-30} 
-                          textAnchor="end"
-                        />
-                        
-                        {/* Eje Y (Valores Monetarios) */}
-                        <YAxis 
-                          tick={{ fontSize: 11, fill: 'var(--muted, #6c757d)' }}
-                          tickFormatter={(val) => `$${(val / 1000000).toFixed(0)}M`} 
-                        />
-                        
-                        {/* Tooltip dinámico con Monto y Participación */}
-                        <Tooltip 
-                          content={({ active, payload, label }) => {
-                            if (active && payload && payload.length) {
-                              const data = payload[0].payload;
-                              return (
-                                <div 
-                                  className="p-2 shadow-sm rounded border"
-                                  style={{ 
-                                    backgroundColor: 'var(--panel, #fff)', 
-                                    borderColor: 'var(--line, #e0e0e0)',
-                                    fontSize: '0.85rem'
-                                  }}
-                                >
-                                  <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
-                                    {label}
-                                  </p>
-                                  <p className="mb-0" style={{ color: '#4e73df' }}>
-                                    Total Ventas: <strong>${Number(data.value).toLocaleString('es-CO')}</strong>
-                                  </p>
-                                  <p className="mb-0 small" style={{ color: '#6c757d'}}>
-                                    Participación: <strong>{data.porcentaje}%</strong> del total
-                                  </p>
+                  // Definir escala visual máxima para la barra de ventas/meta
+                  const maxScale = Math.max(ventas, presupuesto, 1) * 1.15;
+                  const pctVentaBarra = Math.min((ventas / maxScale) * 100, 100);
+                  const pctMetaBarra = Math.min((presupuesto / maxScale) * 100, 100);
+
+                  return {
+                    ...item,
+                    ventas,
+                    presupuesto,
+                    cumplimiento,
+                    rentabilidad,
+                    pctVentaBarra,
+                    pctMetaBarra
+                  };
+                });
+
+                return (
+                  <div className="table-responsive" style={{ maxHeight: '420px', overflowY: 'auto' }}>
+                    <table className="table table-borderless align-middle mb-0" style={{ fontSize: '0.875rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #2d2d2d', fontSize: '0.8rem' }}>
+                          <th style={{ width: '20%' }}>Producto</th>
+                          <th style={{ width: '45%' }}>Ventas / meta</th>
+                          <th style={{ width: '15%' }} className="text-center">Cumplimiento</th>
+                          <th style={{ width: '20%' }}>Rentabilidad</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tableData.map((row, index) => {
+                          const isSuccess = row.cumplimiento >= 100;
+                          const isWarning = row.cumplimiento >= 85 && row.cumplimiento < 100;
+
+                          // Color del punto de cumplimiento (Verde, Naranja o Rojo)
+                          const statusColor = isSuccess ? '#10b981' : isWarning ? '#f97316' : '#ef4444';
+
+                          return (
+                            <tr key={`row-${index}`} style={{ borderBottom: '1px solid #1e1e1e' }}>
+                              {/* 1. Nombre del Producto */}
+                              <td className="fw-bold py-3" style={{fontSize: '0.7rem'}}>{row.name}</td>
+
+                              {/* 2. Barra dual de Ventas / Meta */}
+                              <td className="py-3">
+                                <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
+                                  <span className="fw-bold">${(row.ventas / 1000000).toFixed(0)} M</span>
+                                  <span style={{ color: '#888' }}>
+                                    Meta ${(row.presupuesto / 1000000).toFixed(0)} M
+                                  </span>
                                 </div>
-                              );
-                            }
-                            return null;
-                          }}
-                        />
-                        
-                        {/* Barras verticales sin animación con % estático arriba */}
-                        <Bar 
-                          dataKey="value" 
-                          radius={[6, 6, 0, 0]}
-                          isAnimationActive={false} // 👈 Mantiene las etiquetas fijas y estáticas
-                        >
-                          {lineWithPercentage.map((entry, index) => (
-                            <Cell 
-                              key={`cell-${index}`} 
-                              fill={COLORES_LINEA[index % COLORES_LINEA.length]} 
-                            />
-                          ))}
 
-                          {/* 🎯 ETIQUETA ESTÁTICA NATIVA ARRIBA DE CADA BARRA */}
-                          <LabelList 
-                            dataKey="porcentaje" 
-                            position="top"
-                            formatter={(val) => `${val}%`}
-                            style={{ fill: 'var(--muted, #6c757d)', fontSize: '11px', fontWeight: 'bold' }}
-                          />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  );
-                })()}
-              </div>
+                                {/* Barra de Progreso con Marcador de Meta */}
+                                <div className="position-relative rounded-pill" style={{ height: '8px', border: '#334155 solid 2px', width: '100%' }}>
+                                  {/* Barra Azul de Ventas Realizadas */}
+                                  <div 
+                                    className="rounded-pill" 
+                                    style={{ 
+                                      height: '100%', 
+                                      width: `${row.pctVentaBarra}%`, 
+                                      backgroundColor: '#2563eb',
+                                      transition: 'width 0.3s'
+                                    }} 
+                                  />
+                                  {/* Indicador / Línea Blanca Vertical de la Meta */}
+                                  <div 
+                                    className="position-absolute top-50 translate-middle-y" 
+                                    style={{ 
+                                      left: `${row.pctMetaBarra}%`, 
+                                      height: '14px', 
+                                      width: '2px', 
+                                      border: '#334155 solid 1px',
+                                      boxShadow: '0 0 4px rgba(255,255,255,0.8)'
+                                    }} 
+                                  />
+                                </div>
+                              </td>
+
+                              {/* 3. % Cumplimiento con Indicador de Color */}
+                              <td className="text-center py-3">
+                                <span className="fw-bold me-1">
+                                  {row.cumplimiento.toFixed(1).replace('.', ',')}%
+                                </span>
+                                <span style={{ color: statusColor, fontSize: '1.1rem' }}>●</span>
+                              </td>
+
+                              {/* 4. Rentabilidad (Margen) con mini barra verde */}
+                              <td className="py-3">
+                                <div className="d-flex align-items-center gap-2">
+                                  <span className="fw-bold" style={{ minWidth: '40px' }}>
+                                    {row.rentabilidad.toString().replace('.', ',')}%
+                                  </span>
+                                  <div className="flex-grow-1 rounded-pill" style={{ height: '6px', border: '#334155 solid 1px' }}>
+                                    <div 
+                                      className="rounded-pill" 
+                                      style={{ 
+                                        height: '100%', 
+                                        width: `${Math.min(Math.max(row.rentabilidad, 0), 100)}%`, 
+                                        backgroundColor: '#10b981' 
+                                      }} 
+                                    />
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
