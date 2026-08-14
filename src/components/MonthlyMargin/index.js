@@ -1,6 +1,6 @@
 import React from 'react';
 
-// Componente BulletBar con tu misma lógica y estilos
+// Componente BulletBar (sin cambios en su lógica interna)
 const BulletBar = ({ current = 0, target = 0, pct = 0, isCurrency = true }) => {
   // Safe numbers: nos aseguramos de que siempre sean números válidos
   const safeCurrent = Number(current) || 0;
@@ -35,7 +35,7 @@ const BulletBar = ({ current = 0, target = 0, pct = 0, isCurrency = true }) => {
     <div className="w-100">
       {/* Cabecera: Resultado a la izquierda - Meta a la derecha */}
       <div className="d-flex justify-content-between align-items-center mb-1">
-        <span className="semi-bold" style={{ fontSize: '0.9rem' }}>
+        <span className="fw-bold" style={{ fontSize: '0.8rem' }}>
           {isCurrency ? formatMoney(safeCurrent) : `${safeCurrent.toFixed(2)}%`}
         </span>
         <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
@@ -82,7 +82,7 @@ const BulletBar = ({ current = 0, target = 0, pct = 0, isCurrency = true }) => {
 
       {/* Porcentaje y Punto indicador de Semáforo */}
       <div className="d-flex align-items-center gap-1 mt-1" style={{ fontSize: '0.8rem' }}>
-        <span style={{ color: badgeColor, fontSize: '0.9rem' }}>●</span>
+        <span style={{ color: badgeColor, fontSize: '0.9rem', lineHeight: 1 }}>●</span>
         <span className="fw-bold" style={{ color: badgeColor }}>
           {safePct.toFixed(2)}%
         </span>
@@ -92,51 +92,77 @@ const BulletBar = ({ current = 0, target = 0, pct = 0, isCurrency = true }) => {
 };
 
 // Componente principal para visualizar la comparación mensual
-export default function MonthlyMargin({ monthlyCompareData }) {
+export default function MonthlyMargin({ monthlyCompareData, isMobile = false }) {
   return (
     <div className="rounded-3" style={{ fontFamily: 'sans-serif' }}>
-      <h5 className="small fw-bold mb-3">Comparativa Ventas Vs Rentabilidad ({new Date().getFullYear()})</h5>
-      {/* Encabezados principales */}
-      <div className="row fw-bold mb-1 pb-2 border-bottom border-bottom-secondary border-bottom-opacity-25" style={{ fontSize: '0.8rem' }}>
-        <div className="col-1">Mes</div>
-        <div className="col-6 d-flex">Ventas vs. Presupuesto</div>
-        <div className="col-5">Rentabilidad Real vs. Meta</div>
-      </div>
+      <h5 className="small fw-bold pt-1 mt-1 ps-2 mb-3">
+        Comparativa Ventas Vs Rentabilidad ({new Date().getFullYear()})
+      </h5>
 
-      {/* Filas dinámicas por Mes (Ene, Feb, Mar...) */}
-      <div className="d-flex flex-column gap-1">
-        {monthlyCompareData && monthlyCompareData.map((item) => (
-          <div 
-            key={item.name} 
-            className="row align-items-center py-1 border-bottom border-bottom-secondary border-bottom-opacity-25"
-            style={{ fontSize: '0.7rem' }}
-          >
-            {/* Nombre del Mes */}
-            <div className="col-1 fw-bold" style={{ fontSize: '0.9rem' }} style={{ fontSize: '0.7rem' }}>
-              {item.name}
-            </div>
+      {/* Contenedor responsivo para permitir scroll suave en dispositivos móviles */}
+      <div 
+        style={{ 
+          maxHeight: '390px', 
+          overflowY: 'auto', 
+          overflowX: isMobile ? 'auto' : 'hidden', 
+          WebkitOverflowScrolling: 'touch' 
+        }}
+      >
+        <table className="table-wrap table-responsive align-middle mb-0">
+          <thead>
+            <tr 
+              className="fw-bold border-bottom" 
+              style={{ fontSize: '0.8rem', borderColor: 'var(--bs-border-color-translucent, rgba(127,127,127,0.25))' }}
+            >
+              <th scope="col" style={{ width: '12%' }} className="ps-2">
+                Mes
+              </th>
+              <th scope="col" style={{ width: '48%' }}>
+                Ventas vs. Presupuesto
+              </th>
+              <th scope="col" style={{ width: '40%' }} className="pe-2">
+                Rentabilidad Real vs. Meta
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {monthlyCompareData && monthlyCompareData.map((item) => (
+              <tr 
+                key={item.name} 
+                className="border-bottom"
+                style={{ 
+                  fontSize: '0.7rem',
+                  borderColor: 'var(--bs-border-color-translucent, rgba(127,127,127,0.15))' 
+                }}
+              >
+                {/* 1. Nombre del Mes */}
+                <td className="ps-2 fw-bold" style={{ fontSize: '0.75rem' }}>
+                  {item.name}
+                </td>
 
-            {/* Barra de Ventas */}
-            <div className="col-6">
-              <BulletBar 
-                current={item.Ventas} 
-                target={item.Presupuesto} 
-                pct={item.cumplimientoVentasPct}
-                isCurrency={true} 
-              />
-            </div>
+                {/* 2. Barra de Ventas */}
+                <td className="py-1">
+                  <BulletBar 
+                    current={item.Ventas} 
+                    target={item.Presupuesto} 
+                    pct={item.cumplimientoVentasPct}
+                    isCurrency={true} 
+                  />
+                </td>
 
-            {/* Barra de Rentabilidad */}
-            <div className="col-5">
-              <BulletBar 
-                current={item.Rentabilidad} 
-                target={item.MetaRentabilidad} 
-                pct={item.cumplimientoMargenPct}
-                isCurrency={false} 
-              />
-            </div>
-          </div>
-        ))}
+                {/* 3. Barra de Rentabilidad */}
+                <td className="py-1 pe-1">
+                  <BulletBar 
+                    current={item.Rentabilidad} 
+                    target={item.MetaRentabilidad} 
+                    pct={item.cumplimientoMargenPct}
+                    isCurrency={false} 
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

@@ -49,7 +49,7 @@ export const NavBarData = [
     access: ['admin']
   },
   {
-    id: 3,
+    id: 4,
     title: "Rentabilidad",
     path: "/margen",
     icon: <TbReportMoneyFilled />,
@@ -61,7 +61,7 @@ export const NavBarData = [
     access: ['admin']
   },
   {
-    id: 4,
+    id: 5,
     title: "Inventario",
     path: "/inventario",
     icon: <FiPackage />,
@@ -73,7 +73,7 @@ export const NavBarData = [
     access: ['admin']
   },
   {
-    id: 5,
+    id: 6,
     title: "Control Interno",
     path: "/control/interno",
     icon: <CgSearchFound />,
@@ -85,7 +85,7 @@ export const NavBarData = [
     access: ['admin']
   },
   {
-    id: 6,
+    id: 7,
     title: "Administración",
     path: "/administracion",
     icon: <CiSettings />,

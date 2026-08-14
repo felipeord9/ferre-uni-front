@@ -538,7 +538,8 @@ export default function Ventas() {
     const total = rows.reduce((sum, row) => sum + (Number(row.valor) || 0), 0);
 
     // 2. Facturas Únicas: Contamos cuántos códigos de documento 'doc' diferentes existen
-    const uniqueInvoices = new Set(rows.map(row => row.doc).filter(Boolean)).size;
+    /* const uniqueInvoices = new Set(rows.map(row => row.doc).filter(Boolean)).size; */
+    const uniqueInvoices = rows.length;
 
     // 3. Clientes Únicos: Contamos cuántas cédulas/nit 'cliente' diferentes existen
     const uniqueCustomers = new Set(rows.map(row => row.cliente).filter(Boolean)).size;
@@ -933,13 +934,37 @@ export default function Ventas() {
         .slice(0, 10); // 🏆 Nos quedamos solo con el Top 5 mejores
   };
 
+  /* Funcion para optener el ranking de clientes */
+  const getClientRankingData = (rows) => {
+    if (!rows || rows.length === 0) return [];
+
+    // Agrupamos y sumamos las ventas por cliente
+    const salesByClient = rows.reduce((acc, row) => {
+        const client = row.razonSocial || row.RAZONSOCIAL ||'Desconocido';
+        const val = Number(row.valor) || 0;
+        acc[client] = (acc[client] || 0) + val;
+        return acc;
+    }, {});
+
+    // Convertimos a un array para poder ordenar y formatear
+    return Object.entries(salesByClient)
+        .map(([name, total]) => ({
+        name,
+        // Guardamos el valor bruto para el gráfico y una versión redondeada en Millones para la etiqueta
+        Ventas: Math.round(total),
+        'M ($)': Math.round(total / 1000000) // Ej: 15,000,000 -> 15
+        }))
+        .sort((a, b) => b.Ventas - a.Ventas) // Ordenar de mayor a menor
+        .slice(0, 10); // 🏆 Nos quedamos solo con el Top 5 mejores
+  };
+
   /* Funcion para optener el ranking por proveedor */
   const getSupplierRankingData = (rows) => {
     if (!rows || rows.length === 0) return [];
 
     // Agrupamos y sumamos las ventas por vendedor
     const salesBySupplier = rows.reduce((acc, row) => {
-        const supplier = row.razonSocial || 'Desconocido';
+        const supplier = row.proveedor || row.PROVEEDOR ||'Desconocido';
         const val = Number(row.valor) || 0;
         acc[supplier] = (acc[supplier] || 0) + val;
         return acc;
@@ -1191,7 +1216,7 @@ export default function Ventas() {
   }, [salesData, totalBudget, filters.year, filters.month]);
 
   // procesar datos para el grafico ventas vs margen por CO
-  const compareCoVsMargin = (salesRows, marginRows, selectedYear, selectedMonthFilter) => {
+  const compareCoVsMargin = (salesRows, marginRows, selectedYear, monthFilters) => {
     // Lista Maestra de Centros de Operación
     const nombresCo = ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "020", "100"];
 
@@ -1201,96 +1226,116 @@ export default function Ventas() {
     ];
 
     const salesByCo = {};
-    const utilityByCo = {};
+    const marginSumByCo = {};  // Acumula la suma de % de margen
+    const marginCountByCo = {}; // Acumula la cantidad de registros por C.O.
     const budgetByCo = {};
     const expectedMarginByCo = {};
 
-    // --- 1. RESOLVER EL MES Y NÚMERO DE MES SELECCIONADO ---
-    const rawMonthVal = selectedMonthFilter?.value || (Array.isArray(selectedMonthFilter) ? selectedMonthFilter[0] : selectedMonthFilter);
-    
-    let targetMonthNum = null;
-    let targetMonthName = null;
+    // --- 1. RESOLVER EL/LOS MESES SELECCIONADOS EN UN SET DE NÚMEROS ---
+    const filterArray = Array.isArray(monthFilters) ? monthFilters : (monthFilters ? [monthFilters] : []);
+    const targetMonthNums = new Set();
 
-    if (rawMonthVal) {
-      const rawStr = String(rawMonthVal?.value || rawMonthVal).trim().toUpperCase();
-      const parsedNum = parseInt(rawStr, 10);
+    filterArray.forEach(mItem => {
+      const rawVal = mItem?.value !== undefined ? mItem.value : mItem;
+      if (rawVal !== null && rawVal !== undefined) {
+        const rawStr = String(rawVal).trim().toUpperCase();
+        const parsedNum = parseInt(rawStr, 10);
 
-      if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
-        targetMonthNum = parsedNum;
-        targetMonthName = nombresMesesLargos[parsedNum - 1];
-      } else {
-        const foundIdx = nombresMesesLargos.findIndex(m => m.startsWith(rawStr) || rawStr.startsWith(m));
-        if (foundIdx !== -1) {
-          targetMonthNum = foundIdx + 1;
-          targetMonthName = nombresMesesLargos[foundIdx];
+        if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+          targetMonthNums.add(parsedNum);
+        } else {
+          const foundIdx = nombresMesesLargos.findIndex(m => m.startsWith(rawStr) || rawStr.startsWith(m));
+          if (foundIdx !== -1) {
+            targetMonthNums.add(foundIdx + 1);
+          }
         }
       }
-    }
+    });
 
-    // Helper para formato C.O. a 3 dígitos (ej: 1 -> "001")
+    const monthMultiplier = targetMonthNums.size > 0 ? targetMonthNums.size : 12;
+
+    // Helper para formatear C.O. a 3 dígitos (ej: 1 -> "001")
     const formatCo = (coValue) => {
-      if (!coValue) return "";
+      if (coValue === null || coValue === undefined || coValue === '') return "";
       return String(coValue).trim().padStart(3, '0');
     };
 
-    // --- 2. PROCESAR VENTAS Y UTILIDAD REAL (Filtrando por Año y Mes) ---
+    // Helper para limpiar valores monetarios (ej: "$221.046,00" -> 221046)
+    const parseCurrency = (val) => {
+      if (typeof val === 'number') return val;
+      if (!val) return 0;
+      // Remueve $, puntos de miles y cambia coma decimal por punto
+      const cleanStr = String(val).replace(/\$/g, '').replace(/\./g, '').replace(',', '.').trim();
+      return parseFloat(cleanStr) || 0;
+    };
+
+    // --- 2. PROCESAR VENTAS Y SUMA DE MÁRGENES ---
     if (salesRows && salesRows.length > 0) {
       salesRows.forEach(row => {
-        if (!row.date) return;
-        const parts = row.date.split('/');
+        // Soporta "Fecha" o "date"
+        const dateVal = row.Fecha || row.fecha || row.date;
+        if (!dateVal) return;
+
+        const parts = String(dateVal).split('/');
         if (parts.length === 3) {
           const rowMonth = parseInt(parts[1], 10);
           const rowYear = parts[2];
 
-          // Validamos el año y el mes (si hay mes seleccionado)
           const matchYear = !selectedYear || String(rowYear) === String(selectedYear);
-          const matchMonth = !targetMonthNum || rowMonth === targetMonthNum;
+          const matchMonth = targetMonthNums.size === 0 || targetMonthNums.has(rowMonth);
 
           if (matchYear && matchMonth) {
-            const coKey = formatCo(row.co || row.CO);
+            // Soporta "C.O.", "co" o "CO"
+            const coKey = formatCo(row['C.O.'] ?? row.co ?? row.CO);
+            
             if (coKey) {
-              const valor = Number(row.valor || row.subtotal) || 0;
-              // Parse de margen (ej: "15,5" o 15.5 -> 15.5)
-              const margenPct = parseFloat(String(row.margen || '0').replace(',', '.')) || 0;
+              // Valor de la venta (Subtotal o Venta)
+              const valor = parseCurrency(row['Valor subtotal'] || row.valor || row.subtotal);
+              
+              // Margen (Busca 'Márgen promedio', 'Margen promedio', 'margen', etc.)
+              const rawMargen = row['Márgen promedio'] ?? row['Margen promedio'] ?? row.margen ?? '0';
+              const margenPct = parseFloat(String(rawMargen).replace(',', '.')) || 0;
 
+              // Acumulado de ventas totales $
               salesByCo[coKey] = (salesByCo[coKey] || 0) + valor;
-              // Utilidad acumulada = Venta * (% Margen / 100)
-              utilityByCo[coKey] = (utilityByCo[coKey] || 0) + (valor * (margenPct / 100));
+
+              // Acumulado de la suma de márgenes y conteo de registros
+              marginSumByCo[coKey] = (marginSumByCo[coKey] || 0) + margenPct;
+              marginCountByCo[coKey] = (marginCountByCo[coKey] || 0) + 1;
             }
           }
         }
       });
     }
 
-    // --- 3. PROCESAR METAS Y PRESUPUESTOS DE LA TABLA DE MÁRGENES ---
+    // --- 3. PROCESAR METAS Y PRESUPUESTOS ---
     if (marginRows && marginRows.length > 0) {
       marginRows.forEach(item => {
-        const coKey = formatCo(item.co || item.CO || item.punto);
+        const coKey = formatCo(item['C.O.'] ?? item.co ?? item.CO ?? item.punto);
         if (coKey) {
-          const presupuesto = Number(item.budget || item.presupuesto) || 0;
-          const renEsperada = parseFloat(String(item.expectedMargin || item.ren_esperada || 0).replace(',', '.')) || 0;
+          const presupuestoMensual = Number(item.budget || item.presupuesto || item.monto) || 0;
+          const renEsperada = parseFloat(String(item.expectedMargin || item.ren_esperada || item.rentabilidad || 0).replace(',', '.')) || 0;
 
-          budgetByCo[coKey] = presupuesto;
+          budgetByCo[coKey] = presupuestoMensual * monthMultiplier;
           expectedMarginByCo[coKey] = renEsperada;
         }
       });
     }
 
-    // --- 4. UNIFICAR RESULTADOS Y CALCULAR PORCENTAJES PONDERADOS Y CUMPLIMIENTOS ---
+    // --- 4. UNIFICAR RESULTADOS Y PROMEDIO SIMPLE ---
     return nombresCo.map(co => {
       const totalVentas = Math.round(salesByCo[co] || 0);
-      const totalUtilidad = utilityByCo[co] || 0;
       
-      // Margen Ponderado Real %
-      const margenRealPct = totalVentas > 0 ? (totalUtilidad / totalVentas) * 100 : 0;
-      
-      // Metas cargadas
-      const metaPresupuesto = budgetByCo[co] || 0;
-      const metaRentabilidad = expectedMarginByCo[co] || 27; // 27% por defecto si no existe
+      // Promedio simple del margen = (Suma de Márgenes) / (Número de Registros)
+      const totalMarginSum = marginSumByCo[co] || 0;
+      const totalCount = marginCountByCo[co] || 0;
+      const margenPromedioPct = totalCount > 0 ? (totalMarginSum / totalCount) : 0;
 
-      // Cumplimientos % (Semiautómaticos para semáforo)
+      const metaPresupuesto = budgetByCo[co] || 0;
+      const metaRentabilidad = expectedMarginByCo[co] || 27;
+
       const cumplimientoVentasPct = metaPresupuesto > 0 ? (totalVentas / metaPresupuesto) * 100 : 0;
-      const cumplimientoMargenPct = metaRentabilidad > 0 ? (margenRealPct / metaRentabilidad) * 100 : 0;
+      const cumplimientoMargenPct = metaRentabilidad > 0 ? (margenPromedioPct / metaRentabilidad) * 100 : 0;
 
       return {
         co: co,
@@ -1298,7 +1343,7 @@ export default function Ventas() {
         ventas: totalVentas,
         metaVentas: metaPresupuesto,
         cumplimientoVentasPct: Number(cumplimientoVentasPct.toFixed(2)),
-        rentabilidad: Number(margenRealPct.toFixed(2)),
+        rentabilidad: Number(margenPromedioPct.toFixed(2)), // Promedio % exacto
         metaRentabilidad: metaRentabilidad,
         cumplimientoMargenPct: Number(cumplimientoMargenPct.toFixed(2))
       };
@@ -1401,9 +1446,9 @@ export default function Ventas() {
 
   // Memorizamos los datos combinados para rendimiento
   const chartMargin = useMemo(() => {
-    if (filters.month && filters.month.length === 1) {
-      return compareCoVsMargin(salesData, totalMargin, filters.year, filters.month[0]);
-    } else if(filters.month && filters.month.length === 0 || filters.month && filters.month.length > 1){
+    if (filters.month && filters.month.length >= 1) {
+      return compareCoVsMargin(salesData, totalMargin, filters.year, filters.month);
+    } else if(filters.month && filters.month.length === 0 ){
       return getMarginCompareData(salesData, totalMargin, filters.year);
     }
   }, [salesData, totalMargin, filters.year, filters.month]);
@@ -1413,50 +1458,52 @@ export default function Ventas() {
     salesRows = [], 
     budgetRows = [], 
     selectedYear = '', 
-    selectedMonth = ''
+    selectedMonth = []
   ) => {
-    // Nombres de meses para mapear si selectedMonth viene como número (1-12) o texto
     const nombresMeses = [
       "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
       "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
     ];
 
-    // Determinar el nombre del mes a filtrar si se especifica un mes
-    let targetMonthName = null;
-    if (selectedMonth) {
-      if (!isNaN(selectedMonth)) {
-        const monthIdx = parseInt(selectedMonth, 10) - 1;
-        if (monthIdx >= 0 && monthIdx < 12) {
-          targetMonthName = nombresMeses[monthIdx];
+    // 1. RESOLVER ARRAY DE MESES A UN SET DE NOMBRES EN MAYÚSCULAS
+    const filterArray = Array.isArray(selectedMonth) ? selectedMonth : (selectedMonth ? [selectedMonth] : []);
+    const targetMonthNames = new Set();
+
+    filterArray.forEach(mItem => {
+      const rawVal = mItem?.value !== undefined ? mItem.value : mItem;
+      if (rawVal !== null && rawVal !== undefined) {
+        const rawStr = String(rawVal).trim().toUpperCase();
+        const parsedNum = parseInt(rawStr, 10);
+
+        if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+          targetMonthNames.add(nombresMeses[parsedNum - 1]);
+        } else {
+          const foundIdx = nombresMeses.findIndex(m => m.startsWith(rawStr) || rawStr.startsWith(m));
+          if (foundIdx !== -1) {
+            targetMonthNames.add(nombresMeses[foundIdx]);
+          }
         }
-      } else {
-        targetMonthName = String(selectedMonth).trim().toUpperCase();
       }
-    }
+    });
 
     const salesBySeller = {};
+    const utilityBySeller = {};
     const budgetBySeller = {};
-    const marginStatsBySeller = {};
 
-    // 1. PROCESAR VENTAS REALES
+    // 2. PROCESAR VENTAS Y UTILIDAD REAL PONDERADA
     if (salesRows && salesRows.length > 0) {
       salesRows.forEach(row => {
-        // Validar Filtro de Año y Mes según la fecha "DD/MM/YYYY" o campo date
         if (row.date) {
           const parts = row.date.split('/');
           if (parts.length === 3) {
             const rowYear = parts[2];
             const rowMonthIdx = parseInt(parts[1], 10) - 1;
 
-            // Filtrar por Año si está seleccionado
             if (selectedYear && String(rowYear) !== String(selectedYear)) return;
-
-            // Filtrar por Mes si está seleccionado
-            if (targetMonthName && nombresMeses[rowMonthIdx] !== targetMonthName) return;
+            if (targetMonthNames.size > 0 && !targetMonthNames.has(nombresMeses[rowMonthIdx])) return;
           }
         }
 
-        // Nombre del Vendedor (soporta varios nombres de propiedad habituales)
         const sellerName = (
           row.rzsVendedor || 
           row.vendedor || 
@@ -1465,82 +1512,53 @@ export default function Ventas() {
         ).trim().toUpperCase();
 
         const montoVenta = Number(row.valor || row.subtotal || row.monto) || 0;
-        salesBySeller[sellerName] = (salesBySeller[sellerName] || 0) + montoVenta;
+        const valMargenPct = parseFloat(String(row.margen || '0').replace(',', '.')) || 0;
 
-        const valMargen = Number(row.margen);
-        if (!isNaN(valMargen)) {
-          if (!marginStatsBySeller[sellerName]) {
-            marginStatsBySeller[sellerName] = { suma: 0, cantidad: 0 };
-          }
-          marginStatsBySeller[sellerName].suma += valMargen;
-          marginStatsBySeller[sellerName].cantidad += 1;
-        }
+        salesBySeller[sellerName] = (salesBySeller[sellerName] || 0) + montoVenta;
+        // Utilidad real = Venta * (% Margen / 100)
+        utilityBySeller[sellerName] = (utilityBySeller[sellerName] || 0) + (montoVenta * (valMargenPct / 100));
       });
     }
 
-    // 2. PROCESAR PRESUPUESTO (totalBudget)
+    // 3. PROCESAR PRESUPUESTOS (Suma dinámica por meses filtrados)
     if (budgetRows && budgetRows.length > 0) {
       budgetRows.forEach(item => {
-        // Filtrar por Año
         if (selectedYear && String(item.anio) !== String(selectedYear)) return;
 
-        // Filtrar por Mes ("ENERO", "FEBRERO", etc.)
         const itemMes = item.mes ? item.mes.trim().toUpperCase() : '';
-        if (targetMonthName && itemMes !== targetMonthName) return;
+        if (targetMonthNames.size > 0 && !targetMonthNames.has(itemMes)) return;
 
-        // Obtener el Vendedor desde rzsVendedor
-        const sellerName = (item.rzsVendedor || 'SIN VENDEDOR').trim().toUpperCase();
-        const montoPresupuesto = Number(item.monto) || 0;
+        const sellerName = (item.rzsVendedor || item.vendedor || 'SIN VENDEDOR').trim().toUpperCase();
+        const montoPresupuesto = Number(item.monto || item.presupuesto) || 0;
 
         budgetBySeller[sellerName] = (budgetBySeller[sellerName] || 0) + montoPresupuesto;
       });
     }
 
-    // 3. UNIFICAR TODOS LOS VENDEDORES (Tanto de Ventas como de Presupuesto)
+    // 4. UNIFICAR TODOS LOS VENDEDORES
     const allSellers = Array.from(
       new Set([...Object.keys(salesBySeller), ...Object.keys(budgetBySeller)])
     );
 
-    // 4. MAPEAR Y ORDENAR TOP 10 DE VENTAS
     return allSellers
       .map(seller => {
         const ventas = Math.round(salesBySeller[seller] || 0);
         const presupuesto = Math.round(budgetBySeller[seller] || 0);
+        const utilidadTotal = utilityBySeller[seller] || 0;
 
-        // Cálculo del promedio simple: suma de márgenes / número de registros
-        const stats = marginStatsBySeller[seller];
-        const rentabilidad = (stats && stats.cantidad > 0)
-          ? (stats.suma / stats.cantidad).toFixed(1)
-          : '0.0';
+        // Margen Ponderado Real: (Utilidad Total / Ventas Totales) * 100
+        const rentabilidad = ventas > 0 
+          ? Number(((utilidadTotal / ventas) * 100).toFixed(1)) 
+          : 0;
 
         return {
           name: seller,
           Ventas: ventas,
           Presupuesto: presupuesto,
-          rentabilidad: rentabilidad // Guarda el margen promedio calculado directamente
+          rentabilidad: rentabilidad
         };
       })
       .sort((a, b) => b.Ventas - a.Ventas);
-    /* const ranking = allSellers.map(seller => {
-      // Convertir nombre a Formato Título para mejor presentación en el gráfico ("MORALES IVONNE" -> "Morales Ivonne")
-      const formattedName = seller
-        .toLowerCase()
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
-
-      return {
-        name: formattedName,
-        rawSellerName: seller,
-        Ventas: Math.round(salesBySeller[seller] || 0),
-        Presupuesto: Math.round(budgetBySeller[seller] || 0)
-      };
-    });
-
-    // Ordenar de mayor a menor por Ventas y retornar únicamente los primeros 10
-    return ranking
-      .sort((a, b) => b.Ventas - a.Ventas)
-      .slice(0, 10); */
   };
 
   //funcion para sacar ventas y presupuesto por linea de producto
@@ -1548,42 +1566,54 @@ export default function Ventas() {
     salesRows = [], 
     budgetRows = [], 
     selectedYear = '', 
-    selectedMonth = ''
+    selectedMonth = []
   ) => {
     const nombresMeses = [
       "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
       "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
     ];
 
-    let targetMonthName = null;
-    if (selectedMonth) {
-      if (!isNaN(selectedMonth)) {
-        const monthIdx = parseInt(selectedMonth, 10) - 1;
-        if (monthIdx >= 0 && monthIdx < 12) targetMonthName = nombresMeses[monthIdx];
-      } else {
-        targetMonthName = String(selectedMonth).trim().toUpperCase();
+    // 1. CONVERTIR 'selectedMonth' A UN SET DE NOMBRES EN MAYÚSCULAS (Soporta Arrays, Objetos y Strings)
+    const filterArray = Array.isArray(selectedMonth) ? selectedMonth : (selectedMonth ? [selectedMonth] : []);
+    const targetMonthNames = new Set();
+
+    filterArray.forEach(mItem => {
+      const rawVal = mItem?.value !== undefined ? mItem.value : mItem;
+      if (rawVal !== null && rawVal !== undefined) {
+        const rawStr = String(rawVal).trim().toUpperCase();
+        const parsedNum = parseInt(rawStr, 10);
+
+        if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+          targetMonthNames.add(nombresMeses[parsedNum - 1]);
+        } else {
+          const foundIdx = nombresMeses.findIndex(m => m.startsWith(rawStr) || rawStr.startsWith(m));
+          if (foundIdx !== -1) {
+            targetMonthNames.add(nombresMeses[foundIdx]);
+          }
+        }
       }
-    }
+    });
 
     const salesByLine = {};
+    const utilityByLine = {};
     const budgetByLine = {};
-    
-    // Objeto para almacenar la suma de los márgenes y la cantidad de registros por línea
-    const marginStatsByLine = {};
 
-    // 1. Acumular Ventas y Promediar el campo "margen"
+    // 2. PROCESAR VENTAS Y UTILIDAD REAL (Margen Ponderado)
     if (salesRows && salesRows.length > 0) {
       salesRows.forEach(row => {
+        // Filtrar por Fecha (DD/MM/YYYY)
         if (row.date) {
           const parts = row.date.split('/');
           if (parts.length === 3) {
             const rowYear = parts[2];
             const rowMonthIdx = parseInt(parts[1], 10) - 1;
+
             if (selectedYear && String(rowYear) !== String(selectedYear)) return;
-            if (targetMonthName && nombresMeses[rowMonthIdx] !== targetMonthName) return;
+            if (targetMonthNames.size > 0 && !targetMonthNames.has(nombresMeses[rowMonthIdx])) return;
           }
         }
 
+        // Detectar nombre de la Línea
         const lineName = (
           row.descripLinea || 
           row.linea || 
@@ -1592,57 +1622,58 @@ export default function Ventas() {
         ).trim().toUpperCase();
 
         const montoVenta = Number(row.valor || row.subtotal || row.monto) || 0;
-        salesByLine[lineName] = (salesByLine[lineName] || 0) + montoVenta;
+        const valMargenPct = parseFloat(String(row.margen || '0').replace(',', '.')) || 0;
 
-        // Extraer y acumular la columna de margen guardada como row.margen
-        const valMargen = Number(row.margen);
-        if (!isNaN(valMargen)) {
-          if (!marginStatsByLine[lineName]) {
-            marginStatsByLine[lineName] = { suma: 0, cantidad: 0 };
-          }
-          marginStatsByLine[lineName].suma += valMargen;
-          marginStatsByLine[lineName].cantidad += 1;
-        }
+        salesByLine[lineName] = (salesByLine[lineName] || 0) + montoVenta;
+        
+        // Acumular Utilidad Monetaria Real = Venta * (% Margen / 100)
+        utilityByLine[lineName] = (utilityByLine[lineName] || 0) + (montoVenta * (valMargenPct / 100));
       });
     }
 
-    // 2. Acumular Presupuesto por descripLinea
+    // 3. PROCESAR PRESUPUESTO POR LÍNEA
     if (budgetRows && budgetRows.length > 0) {
       budgetRows.forEach(item => {
+        // Filtrar Año
         if (selectedYear && String(item.anio) !== String(selectedYear)) return;
 
+        // Filtrar Mes
         const itemMes = item.mes ? item.mes.trim().toUpperCase() : '';
-        if (targetMonthName && itemMes !== targetMonthName) return;
+        if (targetMonthNames.size > 0 && !targetMonthNames.has(itemMes)) return;
 
-        const lineName = (item.descripLinea || 'OTRAS LÍNEAS').trim().toUpperCase();
-        const montoPresupuesto = Number(item.monto) || 0;
+        const lineName = (
+          item.descripLinea || 
+          item.linea || 
+          item.lineaProducto || 
+          'OTRAS LÍNEAS'
+        ).trim().toUpperCase();
 
+        const montoPresupuesto = Number(item.monto || item.presupuesto) || 0;
         budgetByLine[lineName] = (budgetByLine[lineName] || 0) + montoPresupuesto;
       });
     }
 
-    // 3. Consolidar todas las líneas encontradas
+    // 4. UNIFICAR Y RETORNAR CONSOLIDADO
     const allLines = Array.from(
       new Set([...Object.keys(salesByLine), ...Object.keys(budgetByLine)])
     );
 
-    // 4. Mapear, promediar el margen y ordenar por ventas
     return allLines
       .map(line => {
         const ventas = Math.round(salesByLine[line] || 0);
         const presupuesto = Math.round(budgetByLine[line] || 0);
+        const utilidadTotal = utilityByLine[line] || 0;
 
-        // Cálculo del promedio simple: suma de márgenes / número de registros
-        const stats = marginStatsByLine[line];
-        const rentabilidad = (stats && stats.cantidad > 0)
-          ? (stats.suma / stats.cantidad).toFixed(1)
+        // Cálculo del Margen Ponderado Real: (Utilidad Total / Ventas Totales) * 100
+        const rentabilidad = ventas > 0 
+          ? ((utilidadTotal / ventas) * 100).toFixed(1) 
           : '0.0';
 
         return {
           name: line,
           Ventas: ventas,
           Presupuesto: presupuesto,
-          rentabilidad: rentabilidad // Guarda el margen promedio calculado directamente
+          rentabilidad: rentabilidad
         };
       })
       .sort((a, b) => b.Ventas - a.Ventas);
@@ -2025,27 +2056,6 @@ export default function Ventas() {
           />
         </div>
 
-        {/* Filtro por fecha */}
-        {/* <div className="col-12 col-sm-6 col-md-2">
-          <label className="form-label fw-semibold text-secondary small mb-1">Desde</label>
-          <input 
-            type="date" 
-            value={filters.startDate}
-            style={{height: 55}}
-            onChange={e => setFilters({...filters, startDate: e.target.value, month: ''})}
-          />
-        </div>
-        <div className="col-12 col-sm-6 col-md-2">
-          <label className="form-label fw-semibold text-secondary small mb-1">Hasta</label>
-          <input 
-            type="date" 
-            value={filters.endDate}
-            style={{height: 55}}
-            disabled={filters.startDate ? false : true}
-            onChange={e => setFilters({...filters, endDate: e.target.value})}
-          />
-        </div> */}
-
         {/* filtro por mes */}
         <div className="col-12 col-sm-6 col-md-2">
           <label className="form-label fw-semibold small mb-1">Mes</label>
@@ -2124,7 +2134,7 @@ export default function Ventas() {
             <KpiCard title="Cumplimiento meta" value={kpiData.goalProgress} subtitle="Ventas / Meta" />
           </div>
           <div className="col-12 col-sm-6 col-lg-3">
-            <KpiCard title="Facturas" value={kpiData.invoices} subtitle="Documentos únicos" />
+            <KpiCard title="Facturas y notas" value={kpiData.invoices} subtitle="Documentos únicos" />
           </div>
           {/* <div className="col-12 col-sm-6 col-lg-3">
             <KpiCard title="Clientes" value={kpiData.customers} subtitle="Clientes únicos" />
@@ -2141,9 +2151,9 @@ export default function Ventas() {
         </div>
 
         {/* Desde aqui comienzan los graficos */}
-        <div className="row row-cols-1 row-cols-md-2 g-4 mb-4">
+        <div className="row row-cols-1 row-cols-md-2 g-4 mb-2">
         {/* Grafico comparativo por mes */}
-          {(filters.month.length === 0 ||  filters.month.length > 1) &&
+          {/* {(filters.month.length === 0 ||  filters.month.length > 1) &&
             <div className="col">
               <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
                 <h5 className="small fw-bold mb-3">Comparativa Mensual de Ventas</h5>
@@ -2195,7 +2205,6 @@ export default function Ventas() {
                             tickFormatter={(v) => `$${(v / 1000000)}M`} 
                           />
                           
-                          {/* 4. Tooltip personalizado para mostrar Monto y Porcentaje */}
                           <Tooltip 
                             content={({ active, payload, label }) => {
                               if (active && payload && payload.length) {
@@ -2233,7 +2242,6 @@ export default function Ventas() {
                             fillOpacity={1} 
                             fill="url(#colorVentas)" 
                           >
-                            {/* 5. OPCIONAL: Muestra el % justo arriba de cada punto de la gráfica */}
                             <LabelList 
                               dataKey="porcentaje" 
                               position="top" 
@@ -2248,249 +2256,15 @@ export default function Ventas() {
                 </div>
               </div>
             </div>
-          }
-          
-
-          {/* Grafico de Ventas por presupuesto */}
-{/*           {filters.month.length === 1 ?
-            <div className="col">
-              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-2'}`}>
-                <div className="d-flex justify-content-between align-items-center mb-3">
-                  <h5 className="small fw-bold mb-0">
-                    Comparativa Ventas por C.O. vs Presupuesto ({filters.month[0]})
-                  </h5>
-                </div>
-
-                <div style={{ width: '100%', height: '400px' }}>
-                  {chartData.length === 0 ? (
-                    <div className="h-100 d-flex align-items-center justify-content-center rounded small">
-                      Sin datos - Cargue un archivo
-                    </div>
-                  ) : (() => {
-                    // 1. Calculamos el % de cumplimiento por cada registro
-                    const dataWithCumplimiento = chartData.map((item) => {
-                      const ventas = Number(item.Ventas) || 0;
-                      const presupuesto = Number(item.Presupuesto) || 0;
-                      
-                      // Prevenimos división por cero
-                      const cumplimiento = presupuesto > 0 
-                        ? ((ventas / presupuesto) * 100).toFixed(1) 
-                        : '0.0';
-
-                      return {
-                        ...item,
-                        cumplimiento: cumplimiento, // Ej: "105.4"
-                      };
-                    });
-
-                    return (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={dataWithCumplimiento}
-                          margin={{ top: 25, right: 20, left: 0, bottom: 0 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line, #f0f0f0)" />
-                          <XAxis dataKey="name" stroke="var(--muted, #6c757d)" fontSize={12} />
-                          
-                          <YAxis 
-                            stroke="var(--muted, #6c757d)" 
-                            fontSize={11} 
-                            tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
-                          />
-                          
-                          <Tooltip 
-                            content={({ active, payload, label }) => {
-                              if (active && payload && payload.length) {
-                                const data = payload[0].payload;
-                                const pct = Number(data.cumplimiento);
-                                const isSuccess = pct >= 100;
-
-                                return (
-                                  <div 
-                                    className="p-2 shadow-sm rounded border"
-                                    style={{ 
-                                      backgroundColor: 'var(--panel, #fff)', 
-                                      borderColor: 'var(--line, #e0e0e0)',
-                                      fontSize: '0.85rem'
-                                    }}
-                                  >
-                                    <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
-                                      {label}
-                                    </p>
-                                    <p className="mb-1" style={{ color: '#4e73df' }}>
-                                      Ventas: <strong>${Number(data.Ventas).toLocaleString('es-CO')}</strong>
-                                    </p>
-                                    <p className="mb-1" style={{ color: '#1cc88a' }}>
-                                      Presupuesto: <strong>${Number(data.Presupuesto).toLocaleString('es-CO')}</strong>
-                                    </p>
-                                    <hr className="my-1" style={{ borderColor: 'var(--line, #e0e0e0)' }} />
-                                    <p className="mb-0 fw-bold" style={{ color: isSuccess ? '#1cc88a' : '#e74a3b' }}>
-                                      Cumplimiento: {data.cumplimiento}% {isSuccess ? '🎯' : '⚠️'}
-                                    </p>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            }}
-                          />
-                          
-                          <Legend verticalAlign="top" height={36} iconType="circle" />
-                          
-                          <Bar 
-                            dataKey="Ventas" 
-                            fill="#4e73df" 
-                            radius={[4, 4, 0, 0]} 
-                            maxBarSize={40}
-                            isAnimationActive={false}
-                          >
-                            <LabelList 
-                              dataKey="cumplimiento" 
-                              position="top" 
-                              formatter={(val) => `${val}%`}
-                              style={{ fill: 'var(--ink, #4e73df)', fontSize: '10px', fontWeight: 'bold' }}
-                            />
-                          </Bar>
-
-                          <Bar 
-                            dataKey="Presupuesto" 
-                            fill="#1cc88a" 
-                            radius={[4, 4, 0, 0]} 
-                            maxBarSize={40}
-                            isAnimationActive={false}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    );
-                  })()}
-                </div>
-              </div>
-            </div>
-            :
-            <div className="col">
-              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
-                <div className="d-flex justify-content-between align-items-center mb-3">
-                  <h5 className="small fw-bold mb-0">
-                    Comparativa Ventas vs Presupuesto ({filters.year})
-                  </h5>
-                </div>
-
-                <div style={{ width: '100%', height: '280px' }}>
-                  {chartData.length === 0 ? (
-                    <div className="h-100 d-flex align-items-center justify-content-center rounded small">
-                      Sin datos - Cargue un archivo
-                    </div>
-                  ) : (() => {
-                    // 1. Filtramos los datos y calculamos el % de cumplimiento
-                    const filteredData = chartData.filter((item) => Number(item.Ventas) > 0);
-                    
-                    const dataWithCumplimiento = filteredData.map((item) => {
-                      const ventas = Number(item.Ventas) || 0;
-                      const presupuesto = Number(item.Presupuesto) || 0;
-                      
-                      const cumplimiento = presupuesto > 0 
-                        ? ((ventas / presupuesto) * 100).toFixed(1) 
-                        : '0.0';
-
-                      return {
-                        ...item,
-                        cumplimiento, // Ej: "98.5"
-                      };
-                    });
-
-                    return (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={dataWithCumplimiento}
-                          margin={{ top: 25, right: 30, left: 20, bottom: 0 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line, #f0f0f0)" />
-                          <XAxis dataKey="name" stroke="var(--muted, #6c757d)" fontSize={12} />
-                          
-                          <YAxis 
-                            stroke="var(--muted, #6c757d)" 
-                            fontSize={11} 
-                            tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
-                          />
-                          
-                          <Tooltip 
-                            content={({ active, payload, label }) => {
-                              if (active && payload && payload.length) {
-                                const data = payload[0].payload;
-                                const pct = Number(data.cumplimiento);
-                                const isSuccess = pct >= 100;
-
-                                return (
-                                  <div 
-                                    className="p-2 shadow-sm rounded border"
-                                    style={{ 
-                                      backgroundColor: 'var(--panel, #fff)', 
-                                      borderColor: 'var(--line, #e0e0e0)',
-                                      fontSize: '0.85rem'
-                                    }}
-                                  >
-                                    <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
-                                      {label}
-                                    </p>
-                                    <p className="mb-1" style={{ color: '#4e73df' }}>
-                                      Ventas: <strong>${Number(data.Ventas).toLocaleString('es-CO')}</strong>
-                                    </p>
-                                    <p className="mb-1" style={{ color: '#1cc88a' }}>
-                                      Presupuesto: <strong>${Number(data.Presupuesto).toLocaleString('es-CO')}</strong>
-                                    </p>
-                                    <hr className="my-1" style={{ borderColor: 'var(--line, #e0e0e0)' }} />
-                                    <p className="mb-0 fw-bold" style={{ color: isSuccess ? '#1cc88a' : '#e74a3b' }}>
-                                      Cumplimiento: {data.cumplimiento}% {isSuccess ? '🎯' : '⚠️'}
-                                    </p>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            }}
-                          />
-                          
-                          <Legend verticalAlign="top" height={36} iconType="circle" />
-                          
-                          <Bar 
-                            dataKey="Ventas" 
-                            fill="#4e73df" 
-                            radius={[4, 4, 0, 0]} 
-                            maxBarSize={40}
-                            isAnimationActive={false}
-                          >
-                            <LabelList
-                              dataKey="Ventas"
-                              position="top"
-                              formatter={(val) => {
-                                const num = Number(val) || 0;
-                                return `$${(num / 1000000).toLocaleString('es-CO', { maximumFractionDigits: 1 })}M`;
-                              }}
-                              style={{ fill: '#1e40af', fontSize: '10px', fontWeight: 'bold' }}
-                            />
-                          </Bar>
-                          
-                          <Bar 
-                            dataKey="Presupuesto" 
-                            fill="#1cc88a" 
-                            radius={[4, 4, 0, 0]} 
-                            maxBarSize={40}
-                            isAnimationActive={false}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    );
-                  })()}
-                </div>
-              </div>
-            </div>
           } */}
-
+  
           {/* Grafico ventas por rentabilidad (margen) */}
           <div className="col">
-            {filters.month.length === 1 ?
-              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`} style={{height: '447px', overflowY: 'auto'}}>
+            {filters.month.length >= 1 ?
+              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-0'}`} style={{height: '447px', maxWidth: isMobile && '88vw', overflowY: 'auto', overflowX: 'auto'}}>
                 {salesData.length === 0 ? (
                   <div className='d-flex h-100 flex-column'>
-                    <h5 className="small fw-bold mb-3">Comparativa Ventas Vs Rentabilidad Por C.O.</h5>
+                    <h5 className="small fw-bold pt-1 mt-1 ps-2 mb-3">Comparativa Ventas Vs Rentabilidad Por C.O.</h5>
                     <div className="h-100 d-flex align-items-center justify-content-center rounded small">
                       Sin datos - Cargue un archivo
                     </div>
@@ -2500,26 +2274,374 @@ export default function Ventas() {
                 )}
               </div>
               :
-              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`} style={{height: '447px', overflowY: 'auto'}}>
+              <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-0'}`} style={{height: '447px', maxWidth: isMobile && '88vw', overflowY: 'auto', overflowX: 'auto'}}>
                 {salesData.length === 0 ? (
                   <div className='d-flex h-100 flex-column'>
-                    <h5 className="small fw-bold mb-3">Comparativa Ventas Vs Rentabilidad ({new Date().getFullYear()})</h5>
+                    <h5 className="small fw-bold pt-1 mt-1 ps-2 mb-3">Comparativa Ventas Vs Rentabilidad ({new Date().getFullYear()})</h5>
                     <div className="h-100 d-flex align-items-center justify-content-center rounded small">
                       Sin datos - Cargue un archivo
                     </div>
                   </div>
                 ):(
-                  <MonthlyMargin monthlyCompareData={chartMargin} />
+                  <MonthlyMargin monthlyCompareData={chartMargin} isMobile={isMobile}/>
                 )}
               </div>
             }
           </div>
 
           {/* Ranking por vendedor */}
-          <SellerRankingChart salesData={salesData} totalBudget={totalBudget} getSellerRankingWithBudget={getSellerRankingWithBudget} filters={filters} />
-          {/* <div className="col">
-            <div className="panel rounded shadow-sm p-3">
-              <h5 className="small fw-bold mb-3">Ranking de Vendedores (Top 10)</h5>
+          <div className="col">
+            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-0'}`} style={{maxWidth: '88vw', overflowX:'auto'}}>
+              <h5 className="small fw-bold mb-3 pt-1 mt-1 ps-2 pb-0">Ventas y rentabilidad por vendedor</h5>
+
+              {salesData.length === 0 ? (
+                <div className="d-flex align-items-center justify-content-center rounded small" style={{ height: '428px' }}>
+                  Sin datos - Cargue un archivo
+                </div>
+              ) : (() => {
+                // 1. Obtención de datos
+                const rawRankingData = getSellerRankingWithBudget
+                  ? getSellerRankingWithBudget(salesData, totalBudget, filters.year, filters.month)
+                  : [];
+
+                // 2. Escala máxima global para mantener proporciones en la barra
+                const maxGlobalVal = rawRankingData.reduce((max, item) => {
+                  return Math.max(max, Number(item.Ventas) || 0, Number(item.Presupuesto) || 0);
+                }, 0);
+                
+                const maxScale = (maxGlobalVal > 0 ? maxGlobalVal : 1) * 1.15;
+
+                // 3. Mapeo y procesamiento de los indicadores
+                const tableData = rawRankingData.map((item) => {
+                  const ventas = Number(item.Ventas) || 0;
+                  const presupuesto = Number(item.Presupuesto) || 0;
+                  const rentabilidad = Number(item.rentabilidad || item.margen) || 0;
+
+                  const cumplimiento = presupuesto > 0 ? (ventas / presupuesto) * 100 : 0;
+                  const pctVentaBarra = Math.min((ventas / maxScale) * 100, 100);
+                  const pctMetaBarra = Math.min((presupuesto / maxScale) * 100, 100);
+
+                  return {
+                    ...item,
+                    ventas,
+                    presupuesto,
+                    cumplimiento,
+                    rentabilidad,
+                    pctVentaBarra,
+                    pctMetaBarra
+                  };
+                });
+
+                return (
+                    <div 
+                      style={{ 
+                        maxHeight: '398px', 
+                        overflowY: 'auto', 
+                        overflowX: isMobile ? 'auto' : 'hidden',
+                        WebkitOverflowScrolling: 'touch'
+                      }}
+                    >
+                      <table 
+                        className="table-wrap table-responsive align-middle mb-0"
+                        style={{ 
+                          minWidth: isMobile ? '600px' : '100%' // Asegura que las barras mantengan su ancho en mobile
+                        }}
+                      >
+                        <thead>
+                          <tr 
+                            className="fw-bold border-bottom" 
+                            style={{ fontSize: '0.8rem', borderColor: 'var(--bs-border-color)' }}
+                          >
+                            <th scope="col" style={{ width: isMobile ? '120px' : '25%' }} className="ps-1">
+                              Vendedor
+                            </th>
+                            <th scope="col" style={{ width: isMobile ? '220px' : '35%' }}>
+                              Ventas / meta
+                            </th>
+                            <th scope="col" style={{ width: isMobile ? '140px' : '20%' }} className="text-center">
+                              Cumplimiento
+                            </th>
+                            <th scope="col" style={{ width: isMobile ? '160px' : '20%' }} className="text-center pe-1">
+                              Rentabilidad
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tableData.map((row, index) => {
+                            const isSuccess = row.cumplimiento >= 100;
+                            const isWarning = row.cumplimiento >= 80 && row.cumplimiento < 100;
+
+                            // Color del punto de semáforo
+                            const statusColor = isSuccess ? '#10b981' : isWarning ? '#f97316' : '#ef4444';
+
+                            return (
+                              <tr 
+                                key={`seller-row-${index}`}
+                                className="border-bottom"
+                                style={{ borderColor: 'var(--bs-border-color-translucent, rgba(127,127,127,0.15))' }}
+                              >
+                                {/* 1. Vendedor */}
+                                <td className="ps-1 fw-bold" style={{ fontSize: '0.72rem' }}>
+                                  {row.name}
+                                </td>
+
+                                {/* 2. Ventas / Meta (Barra dual) */}
+                                <td className="py-2">
+                                  <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
+                                    <span className="fw-bold">${(row.ventas / 1000000).toFixed(0)} M</span>
+                                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                                      Meta ${(row.presupuesto / 1000000).toFixed(0)} M
+                                    </span>
+                                  </div>
+
+                                  {/* Track de la barra */}
+                                  <div 
+                                    className="position-relative rounded-pill overflow-visible" 
+                                    style={{ height: '8px', border: '#334155 solid 2px', width: '100%' }}
+                                  >
+                                    {/* Barra Azul de Ventas Realizadas */}
+                                    <div 
+                                      className="rounded-pill" 
+                                      style={{ 
+                                        height: '100%', 
+                                        width: `${row.pctVentaBarra}%`, 
+                                        backgroundColor: '#2563eb',
+                                        transition: 'width 0.4s ease-in-out'
+                                      }} 
+                                    />
+
+                                    {/* Marcador Vertical de la Meta */}
+                                    {row.presupuesto > 0 && (
+                                      <div 
+                                        className="position-absolute top-50 translate-middle-y" 
+                                        style={{ 
+                                          left: `${row.pctMetaBarra}%`, 
+                                          height: '14px', 
+                                          width: '2px', 
+                                          backgroundColor: 'var(--bs-body-color, #ffffff)',
+                                          boxShadow: '0 0 3px rgba(0, 0, 0, 0.4)',
+                                          zIndex: 2
+                                        }} 
+                                      />
+                                    )}
+                                  </div>
+                                </td>
+
+                                {/* 3. Cumplimiento */}
+                                <td className="text-center">
+                                  <span className="fw-bold" style={{ fontSize: '0.82rem' }}>
+                                    {row.cumplimiento.toFixed(1).replace('.', ',')}%
+                                  </span>
+                                  <span style={{ color: statusColor, fontSize: '1rem', lineHeight: 1 }}>●</span>
+                                </td>
+
+                                {/* 4. Rentabilidad */}
+                                <td className="pe-1">
+                                  <div className="d-flex flex-column align-items-center justify-content-center">
+                                    <div>
+                                      <span className="fw-bold" style={{ fontSize: '0.82rem' }}>
+                                        {row.rentabilidad.toFixed(1).replace('.', ',')}%
+                                      </span>
+                                    </div>
+                                    <div 
+                                      className="rounded-pill w-75" 
+                                      style={{ height: '8px', border: '#334155 solid 2px' }}
+                                    >
+                                      <div 
+                                        className="rounded-pill" 
+                                        style={{ 
+                                          height: '100%', 
+                                          width: `${Math.min(Math.max(row.rentabilidad, 0), 100)}%`, 
+                                          backgroundColor: '#10b981' 
+                                        }} 
+                                      />
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Ventas por linea */}
+          <div className="col">
+            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-0'}`} style={{maxWidth: '88vw', overflowX:'auto'}}> 
+              <h5 className="small fw-bold mb-3 pt-1 mt-1 ps-2 pb-0">Ventas por Línea de producto</h5>
+              
+              {salesData.length === 0 ? (
+                <div className="d-flex align-items-center justify-content-center rounded small" style={{ height: '395px' }}>
+                  Sin datos - Cargue un archivo
+                </div>
+              ) : (() => {
+                // 1. Obtener la data con Ventas, Presupuesto y Margen Promedio (rentabilidad)
+                const rawLineData = getLineShareWithBudgetData(salesData, totalBudget, filters.year, filters.month);
+
+                // 2. Procesar los indicadores por cada producto/línea
+                const tableData = rawLineData.map((item) => {
+                  const ventas = Number(item.Ventas) || 0;
+                  const presupuesto = Number(item.Presupuesto) || 0;
+                  const rentabilidad = Number(item.rentabilidad) || 0;
+
+                  const cumplimiento = presupuesto > 0 ? (ventas / presupuesto) * 100 : 0;
+
+                  // Definir escala visual máxima para la barra de ventas/meta
+                  const maxScale = Math.max(ventas, presupuesto, 1) * 1.15;
+                  const pctVentaBarra = Math.min((ventas / maxScale) * 100, 100);
+                  const pctMetaBarra = Math.min((presupuesto / maxScale) * 100, 100);
+
+                  return {
+                    ...item,
+                    ventas,
+                    presupuesto,
+                    cumplimiento,
+                    rentabilidad,
+                    pctVentaBarra,
+                    pctMetaBarra
+                  };
+                });
+
+                return (
+                  // Contenedor con scroll responsivo
+                  <div 
+                    style={{ 
+                      maxHeight: '395px', 
+                      overflowY: 'auto', 
+                      overflowX: isMobile ? 'auto' : 'hidden', 
+                      WebkitOverflowScrolling: 'touch' 
+                    }}
+                  >
+                    <table 
+                      className="table-wrap table-responsive align-middle mb-0"
+                      style={{ 
+                        minWidth: isMobile ? '600px' : '100%' // Asegura espacio para las barras en celular
+                      }}
+                    >
+                      <thead>
+                        <tr 
+                          className="fw-bold border-bottom" 
+                          style={{ fontSize: '0.8rem', borderColor: 'var(--bs-border-color, #2d2d2d)'}}
+                        >
+                          <th scope="col" style={{ width: isMobile ? '120px' : '25%' }} className="ps-1">
+                            Línea
+                          </th>
+                          <th scope="col" style={{ width: isMobile ? '220px' : '35%' }}>
+                            Ventas / meta
+                          </th>
+                          <th scope="col" style={{ width: isMobile ? '120px' : '20%' }} className="text-center">
+                            Cumplimiento
+                          </th>
+                          <th scope="col" style={{ width: isMobile ? '140px' : '20%' }} className="text-center pe-1">
+                            Rentabilidad
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tableData.map((row, index) => {
+                          const isSuccess = row.cumplimiento >= 100;
+                          const isWarning = row.cumplimiento >= 85 && row.cumplimiento < 100;
+
+                          // Color del punto de cumplimiento (Verde, Naranja o Rojo)
+                          const statusColor = isSuccess ? '#10b981' : isWarning ? '#f97316' : '#ef4444';
+
+                          return (
+                            <tr 
+                              key={`row-${index}`}
+                              className="border-bottom"
+                              style={{ borderColor: 'var(--bs-border-color-translucent, rgba(127,127,127,0.15))' }}
+                            >
+                              {/* 1. Nombre del Producto */}
+                              <td className="ps-1 fw-bold" style={{ fontSize: '0.7rem' }}>
+                                {row.name}
+                              </td>
+
+                              {/* 2. Ventas / Meta (Barra dual) */}
+                              <td className="py-2">
+                                <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
+                                  <span className="fw-bold">${(row.ventas / 1000000).toFixed(0)} M</span>
+                                  <span style={{ color: '#888', fontSize: '0.75rem' }}>
+                                    Meta ${(row.presupuesto / 1000000).toFixed(0)} M
+                                  </span>
+                                </div>
+
+                                {/* Barra de Progreso con Marcador de Meta */}
+                                <div className="position-relative rounded-pill overflow-visible" style={{ height: '8px', border: '#334155 solid 2px', width: '100%' }}>
+                                  {/* Barra Azul de Ventas Realizadas */}
+                                  <div 
+                                    className="rounded-pill" 
+                                    style={{ 
+                                      height: '100%', 
+                                      width: `${row.pctVentaBarra}%`, 
+                                      backgroundColor: '#2563eb',
+                                      transition: 'width 0.3s'
+                                    }} 
+                                  />
+                                  {/* Indicador Vertical de la Meta */}
+                                  {row.presupuesto > 0 && (
+                                    <div 
+                                      className="position-absolute top-50 translate-middle-y" 
+                                      style={{ 
+                                        left: `${row.pctMetaBarra}%`, 
+                                        height: '14px', 
+                                        width: '2px', 
+                                        border: '#334155 solid 1px',
+                                        backgroundColor: '#ffffff',
+                                        boxShadow: '0 0 4px rgba(255,255,255,0.8)',
+                                        zIndex: 2
+                                      }} 
+                                    />
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* 3. % Cumplimiento */}
+                              <td className="text-center">
+                                <span className="fw-bold me-1" style={{ fontSize: '0.82rem' }}>
+                                  {row.cumplimiento.toFixed(1).replace('.', ',')}%
+                                </span>
+                                <span style={{ color: statusColor, fontSize: '1.1rem', lineHeight: 1 }}>●</span>
+                              </td>
+
+                              {/* 4. Rentabilidad (Margen) con mini barra verde */}
+                              <td className="pe-1 mb-1">
+                                <div className="d-flex flex-column align-items-center gap-1 ">
+                                  <div>
+                                    <span className="fw-bold" style={{ minWidth: '40px', fontSize: '0.82rem' }}>
+                                      {row.rentabilidad.toString().replace('.', ',')}%
+                                    </span>
+                                  </div>
+                                  <div className="rounded-pill w-75" style={{ height: '8px', border: '#334155 solid 1px' }}>
+                                    <div 
+                                      className="rounded-pill" 
+                                      style={{ 
+                                        height: '100%', 
+                                        width: `${Math.min(Math.max(row.rentabilidad, 0), 100)}%`, 
+                                        backgroundColor: '#10b981' 
+                                      }} 
+                                    />
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+          
+          {/* Ranking por cliente */}
+          <div className="col">
+            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
+              <h5 className="small fw-bold mb-3">Ranking de clientes (Top 10)</h5>
               <div style={{ width: '100%', height: '380px' }}>
                 {salesData.length === 0 ? (
                   <div className="h-100 d-flex align-items-center justify-content-center rounded small">
@@ -2527,51 +2649,36 @@ export default function Ventas() {
                   </div>
                 ) : (() => {
                   // 1. Obtenemos la data base del ranking
-                  const rawRankingData = getSellerRankingData(salesData);
+                  const rawClientData = getClientRankingData(salesData);
 
-                  // 2. Calculamos el total para sacar el % de participación
-                  const totalVentasTop = rawRankingData.reduce(
+                  // 2. Calculamos la suma total de las ventas del Top 10
+                  const totalVentasTop = rawClientData.reduce(
                     (acc, item) => acc + (Number(item.Ventas) || 0), 
                     0
                   );
 
-                  // 3. Inyectamos la participación
-                  const rankingWithPercentage = rawRankingData.map((item) => {
+                  // 3. Inyectamos la participación % de cada cliente
+                  const clientWithPercentage = rawClientData.map((item) => {
                     const val = Number(item.Ventas) || 0;
                     const pct = totalVentasTop > 0 ? ((val / totalVentasTop) * 100).toFixed(1) : '0.0';
                     return {
                       ...item,
-                      porcentaje: pct,
+                      porcentaje: pct, // Ej: "15.4"
                     };
                   });
 
                   return (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
-                        layout="horizontal"
-                        data={rankingWithPercentage}
-                        margin={{ top: 25, right: 20, left: 10, bottom: 45 }}
+                        layout="vertical"
+                        data={clientWithPercentage}
+                        margin={{ top: 5, right: 50, left: 20, bottom: 5 }} // right: 50 asegura que el % no se corte
                       >
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line, #f0f0f0)" />
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--line, #f0f0f0)" />
+                        <XAxis type="number" tickFormatter={(v) => `$${(v / 1000000)}M`} stroke="var(--muted, #6c757d)" fontSize={12} />
+                        <YAxis dataKey="name" type="category" stroke="var(--muted, #6c757d)" fontSize={11} width={80} />
                         
-                        <XAxis 
-                          dataKey="name" 
-                          type="category" 
-                          stroke="var(--muted, #6c757d)" 
-                          fontSize={11} 
-                          interval={0}
-                          angle={-35}
-                          textAnchor="end"
-                        />
-                        
-                        <YAxis 
-                          type="number" 
-                          tickFormatter={(v) => `$${(v / 1000000).toFixed(0)}M`} 
-                          stroke="var(--muted, #6c757d)" 
-                          fontSize={11} 
-                          domain={[0, (dataMax) => dataMax * 1.15]}
-                        />
-                        
+                        {/* Tooltip con información detallada */}
                         <Tooltip 
                           content={({ active, payload, label }) => {
                             if (active && payload && payload.length) {
@@ -2601,29 +2708,36 @@ export default function Ventas() {
                           }}
                         />
                         
+                        {/* Barra de Ventas Estática */}
                         <Bar 
                           dataKey="Ventas" 
-                          radius={[4, 4, 0, 0]} 
-                          barSize={24}
-                          isAnimationActive={false}
+                          radius={[0, 4, 4, 0]} 
+                          barSize={18}
+                          isAnimationActive={false} // 👈 Elimina animaciones para mantener los textos estáticos
                         >
-                          {rankingWithPercentage.map((entry, index) => (
+                          {/* Colores individuales para cada cliente */}
+                          {clientWithPercentage.map((entry, index) => (
                             <Cell 
                               key={`cell-${index}`} 
-                              fill={COLORES_RANKING_VENDEDORES[index % COLORES_RANKING_VENDEDORES.length]} 
+                              fill={COLORES_RANKING_CLIENTES[index % COLORES_RANKING_CLIENTES.length]} 
                             />
                           ))}
 
+                          {/* 🎯 ETIQUETA ESTÁTICA NATIVA A LA DERECHA */}
                           <LabelList 
                             dataKey="Ventas" 
-                            position="top"
-                            dy={-10}
+                            position="right"
+                            dx={8}
                             formatter={(val) => {
                               const num = Number(val) || 0;
                               return `$${(num / 1000000).toLocaleString('es-CO', { maximumFractionDigits: 1 })}M`;
                             }}
-                            style={{ fill: '#6c757d', fontSize: '10px', fontWeight: 'bold' }}
+                            style={{ fill: '#6c757d', fontSize: '11px', fontWeight: 'bold' }}
                           />
+                          {/* <LabelList
+                              dataKey="porcentaje"
+                              content={<RenderPercentage />}
+                          /> */}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
@@ -2631,12 +2745,12 @@ export default function Ventas() {
                 })()}
               </div>
             </div>
-          </div> */}
-          
-          {/* Ranking por cliente */}
+          </div>
+
+          {/* Ranking por proveedor */}
           <div className="col">
             <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-3'}`}>
-              <h5 className="small fw-bold mb-3">Ranking de clientes (Top 10)</h5>
+              <h5 className="small fw-bold mb-3">Ranking de proveedores (Top 10)</h5>
               <div style={{ width: '100%', height: '380px' }}>
                 {salesData.length === 0 ? (
                   <div className="h-100 d-flex align-items-center justify-content-center rounded small">
@@ -2857,7 +2971,7 @@ export default function Ventas() {
                         {/* Leyenda en la parte inferior */}
                         <Legend
                           verticalAlign="bottom"
-                          height={36}
+                          height={isMobile ? 65 : 36}
                           iconType="circle"
                           wrapperStyle={{ fontSize: '11px', color: 'var(--muted, #6c757d)' }}
                         />
@@ -2984,7 +3098,7 @@ export default function Ventas() {
                         {/* Leyenda en la parte inferior */}
                         <Legend
                           verticalAlign="bottom"
-                          height={36}
+                          height={isMobile ? 92 : 52}
                           iconType="circle"
                           wrapperStyle={{ fontSize: '11px', color: 'var(--muted, #6c757d)' }}
                         />
@@ -2996,137 +3110,6 @@ export default function Ventas() {
             </div>
           </div>
 
-          {/* Ventas por linea */}
-          <div className="col">
-            <div className={`panel rounded shadow-sm ${isMobile ? 'p-0' : 'p-2'}`}>              
-              <h5 className="small fw-bold mb-3">Ventas por Línea de producto</h5>
-              {salesData.length === 0 ? (
-                <div className="d-flex align-items-center justify-content-center rounded small" style={{ height: '300px' }}>
-                  Sin datos - Cargue un archivo
-                </div>
-              ) : (() => {
-                // 1. Obtener la data con Ventas, Presupuesto y Margen Promedio (rentabilidad)
-                const rawLineData = getLineShareWithBudgetData(salesData, totalBudget, filters.year, filters.month);
-
-                // 2. Procesar los indicadores por cada producto/línea
-                const tableData = rawLineData.map((item) => {
-                  const ventas = Number(item.Ventas) || 0;
-                  const presupuesto = Number(item.Presupuesto) || 0;
-                  const rentabilidad = Number(item.rentabilidad) || 0;
-
-                  const cumplimiento = presupuesto > 0 ? (ventas / presupuesto) * 100 : 0;
-
-                  // Definir escala visual máxima para la barra de ventas/meta
-                  const maxScale = Math.max(ventas, presupuesto, 1) * 1.15;
-                  const pctVentaBarra = Math.min((ventas / maxScale) * 100, 100);
-                  const pctMetaBarra = Math.min((presupuesto / maxScale) * 100, 100);
-
-                  return {
-                    ...item,
-                    ventas,
-                    presupuesto,
-                    cumplimiento,
-                    rentabilidad,
-                    pctVentaBarra,
-                    pctMetaBarra
-                  };
-                });
-
-                return (
-                  <div className="table-responsive" style={{ maxHeight: '420px', overflowY: 'auto' }}>
-                    <table className="table table-borderless align-middle mb-0" style={{ fontSize: '0.875rem' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid #2d2d2d', fontSize: '0.8rem' }}>
-                          <th style={{ width: '20%' }}>Producto</th>
-                          <th style={{ width: '45%' }}>Ventas / meta</th>
-                          <th style={{ width: '15%' }} className="text-center">Cumplimiento</th>
-                          <th style={{ width: '20%' }}>Rentabilidad</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tableData.map((row, index) => {
-                          const isSuccess = row.cumplimiento >= 100;
-                          const isWarning = row.cumplimiento >= 85 && row.cumplimiento < 100;
-
-                          // Color del punto de cumplimiento (Verde, Naranja o Rojo)
-                          const statusColor = isSuccess ? '#10b981' : isWarning ? '#f97316' : '#ef4444';
-
-                          return (
-                            <tr key={`row-${index}`} style={{ borderBottom: '1px solid #1e1e1e' }}>
-                              {/* 1. Nombre del Producto */}
-                              <td className="fw-bold py-3" style={{fontSize: '0.7rem'}}>{row.name}</td>
-
-                              {/* 2. Barra dual de Ventas / Meta */}
-                              <td className="py-3">
-                                <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
-                                  <span className="fw-bold">${(row.ventas / 1000000).toFixed(0)} M</span>
-                                  <span style={{ color: '#888' }}>
-                                    Meta ${(row.presupuesto / 1000000).toFixed(0)} M
-                                  </span>
-                                </div>
-
-                                {/* Barra de Progreso con Marcador de Meta */}
-                                <div className="position-relative rounded-pill" style={{ height: '8px', border: '#334155 solid 2px', width: '100%' }}>
-                                  {/* Barra Azul de Ventas Realizadas */}
-                                  <div 
-                                    className="rounded-pill" 
-                                    style={{ 
-                                      height: '100%', 
-                                      width: `${row.pctVentaBarra}%`, 
-                                      backgroundColor: '#2563eb',
-                                      transition: 'width 0.3s'
-                                    }} 
-                                  />
-                                  {/* Indicador / Línea Blanca Vertical de la Meta */}
-                                  <div 
-                                    className="position-absolute top-50 translate-middle-y" 
-                                    style={{ 
-                                      left: `${row.pctMetaBarra}%`, 
-                                      height: '14px', 
-                                      width: '2px', 
-                                      border: '#334155 solid 1px',
-                                      boxShadow: '0 0 4px rgba(255,255,255,0.8)'
-                                    }} 
-                                  />
-                                </div>
-                              </td>
-
-                              {/* 3. % Cumplimiento con Indicador de Color */}
-                              <td className="text-center py-3">
-                                <span className="fw-bold me-1">
-                                  {row.cumplimiento.toFixed(1).replace('.', ',')}%
-                                </span>
-                                <span style={{ color: statusColor, fontSize: '1.1rem' }}>●</span>
-                              </td>
-
-                              {/* 4. Rentabilidad (Margen) con mini barra verde */}
-                              <td className="py-3">
-                                <div className="d-flex align-items-center gap-2">
-                                  <span className="fw-bold" style={{ minWidth: '40px' }}>
-                                    {row.rentabilidad.toString().replace('.', ',')}%
-                                  </span>
-                                  <div className="flex-grow-1 rounded-pill" style={{ height: '6px', border: '#334155 solid 1px' }}>
-                                    <div 
-                                      className="rounded-pill" 
-                                      style={{ 
-                                        height: '100%', 
-                                        width: `${Math.min(Math.max(row.rentabilidad, 0), 100)}%`, 
-                                        backgroundColor: '#10b981' 
-                                      }} 
-                                    />
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
         </div>
       </div>
 
