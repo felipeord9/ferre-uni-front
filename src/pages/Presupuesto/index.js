@@ -5,7 +5,7 @@ import { NavBarData } from '../../components/Navbar/NavbarData';
 import { getAllAgencies } from '../../services/agencyService';
 import AuthContext from '../../context/authContext';
 import { createBudget, createMultipleBudget, findBudgets, findBudgetsByYear, replaceBudget, updateMultiple } from '../../services/budgetService';
-import { findRecords } from '../../services/recordBudgetService'
+import { createRecordBudget, findRecords } from '../../services/recordBudgetService'
 import {  NumericFormat  }  from  'react-number-format' ;
 import Chulo from '../../assets/chulo-verde.png'
 import { FaUnlock } from "react-icons/fa";
@@ -358,6 +358,16 @@ export default function Presupuesto() {
     if(presupuestoListo.length > 0){
       createMultipleBudget(presupuestoListo)
       .then(()=>{
+        const inf = {
+          date: new Date(),
+          uploadBy: user.name,
+          rows: presupuestoListo.length,
+          mode: 'Agregar/Actualizar',
+        }
+        createRecordBudget(inf)
+        .catch(()=>{
+          console.log('error')
+        })
         Swal.fire({
           imageUrl: Chulo,
           imageWidth: 100,
@@ -400,6 +410,16 @@ export default function Presupuesto() {
     if(presupuestoListo.length > 0){
       replaceBudget(presupuestoListo)
       .then(()=>{
+        const inf = {
+          date: new Date(),
+          uploadBy: user.name,
+          rows: presupuestoListo.length,
+          mode: 'Reemplazar Todo',
+        }
+        createRecordBudget(inf)
+        .catch(()=>{
+          console.log('error')
+        })
         Swal.fire({
           imageUrl: Chulo,
           imageWidth: 100,
@@ -827,184 +847,197 @@ export default function Presupuesto() {
   };
 
   const handleuploadInfo = (file) => {
-  if (!file) return;
+    if (!file) return;
 
-  // Detectamos si es un archivo plano de texto o CSV
-  const isTextFile = file.name.endsWith('.txt') || file.name.endsWith('.csv');
+    // Detectamos si es un archivo plano de texto o CSV
+    const isTextFile = file.name.endsWith('.txt') || file.name.endsWith('.csv');
 
-  Swal.fire({
-    title: 'Procesando archivo',
-    text: `Por favor, espera mientras se lee el archivo ${isTextFile ? 'de texto' : 'Excel'} y se consolidan las 3 hojas...`,
-    allowOutsideClick: false,
-    showConfirmButton: false,
-    didOpen: () => {
-      Swal.showLoading();
-    }
-  });
-
-  const reader = new FileReader();
-
-  reader.onload = (event) => {
-    try {
-      const data = event.target.result;
-      let workbook;
-
-      // 🎯 CONFIGURACIÓN DINÁMICA DE LECTURA SHEETJS
-      if (isTextFile) {
-        workbook = XLSX.read(data, { type: 'string', codepage: 65001 });
-      } else {
-        workbook = XLSX.read(data, { type: 'binary' });
+    Swal.fire({
+      title: 'Procesando archivo',
+      text: `Por favor, espera mientras se lee el archivo ${isTextFile ? 'de texto' : 'Excel'} y se consolidan las 3 hojas...`,
+      allowOutsideClick: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading();
       }
+    });
 
-      // Validamos que el libro tenga al menos 3 hojas
-      if (workbook.SheetNames.length < 3) {
-        Swal.fire({
-          icon: 'warning',
-          title: 'Estructura incorrecta',
-          text: 'El archivo Excel debe contener al menos 3 hojas: Presupuesto CO, Líneas y Vendedores.',
-        });
-        return;
-      }
+    const reader = new FileReader();
 
-      // 1. Extraemos las 3 hojas por su posición en el libro
-      const sheetCO = workbook.Sheets[workbook.SheetNames[0]];
-      const sheetLineas = workbook.Sheets[workbook.SheetNames[1]];
-      const sheetVendedores = workbook.Sheets[workbook.SheetNames[2]];
+    reader.onload = (event) => {
+      try {
+        const data = event.target.result;
+        let workbook;
 
-      const jsonCO = XLSX.utils.sheet_to_json(sheetCO);
-      const jsonLineas = XLSX.utils.sheet_to_json(sheetLineas);
-      const jsonVendedores = XLSX.utils.sheet_to_json(sheetVendedores);
+        // 🎯 CONFIGURACIÓN DINÁMICA DE LECTURA SHEETJS
+        if (isTextFile) {
+          workbook = XLSX.read(data, { type: 'string', codepage: 65001 });
+        } else {
+          workbook = XLSX.read(data, { type: 'binary' });
+        }
 
-      if (jsonCO.length === 0 || jsonLineas.length === 0 || jsonVendedores.length === 0) {
-        Swal.fire({
-          icon: 'error',
-          title: 'Hojas vacías',
-          text: 'Alguna de las 3 hojas no contiene registros.',
-          showConfirmButton: false,
-          timer: 5000,
-        });
-        return;
-      }
+        // Validamos que el libro tenga al menos 3 hojas
+        if (workbook.SheetNames.length < 3) {
+          Swal.fire({
+            icon: 'warning',
+            title: 'Estructura incorrecta',
+            text: 'El archivo Excel debe contener al menos 3 hojas: Presupuesto CO, Líneas y Vendedores.',
+          });
+          return;
+        }
 
-      // Funciones auxiliares de limpieza interna
-      const parseValue = (val) => parseCurrencyToNumber ? parseCurrencyToNumber(val) : (parseFloat(String(val).replace(/[^0-9.-]+/g, '')) || 0);
-      const parsePct = (val) => {
-        if (typeof val === 'number') return val > 1 ? val / 100 : val;
-        const num = parseFloat(String(val).replace('%', '').trim()) || 0;
-        return num > 1 ? num / 100 : num;
-      };
-      const formatCO = (val) => val !== undefined && val !== null ? String(val).trim().padStart(3, '0') : '';
-      const cleanStr = (val) => String(val || '').trim().toUpperCase();
+        // 1. Extraemos las 3 hojas por su posición en el libro
+        const sheetCO = workbook.Sheets[workbook.SheetNames[0]];
+        const sheetLineas = workbook.Sheets[workbook.SheetNames[1]];
+        const sheetVendedores = workbook.Sheets[workbook.SheetNames[2]];
 
-      // 2. CONSOLIDACIÓN DE LAS 3 HOJAS EN FILAS TRANSFORMA
-      const transformedRows = [];
+        const jsonCO = XLSX.utils.sheet_to_json(sheetCO);
+        const jsonLineas = XLSX.utils.sheet_to_json(sheetLineas);
+        const jsonVendedores = XLSX.utils.sheet_to_json(sheetVendedores);
 
-      jsonCO.forEach(rowCO => {
-        const co = formatCO(rowCO.CO || rowCO.co || rowCO.Cod_CO);
-        const mes = cleanStr(rowCO.mes || rowCO.MES);
-        const anio = String(rowCO.año || rowCO.AÑO || rowCO.anio || rowCO.ANIO || '');
-        const pptoTotalCO = parseValue(rowCO.presupuesto || rowCO.Ppto_Vta || rowCO.monto);
+        if (jsonCO.length === 0 || jsonLineas.length === 0 || jsonVendedores.length === 0) {
+          Swal.fire({
+            icon: 'error',
+            title: 'Hojas vacías',
+            text: 'Alguna de las 3 hojas no contiene registros.',
+            showConfirmButton: false,
+            timer: 5000,
+          });
+          return;
+        }
 
-        if (!co || !mes || !anio || pptoTotalCO <= 0) return;
+        // Funciones auxiliares de limpieza interna
+        const parseValue = (val) => parseCurrencyToNumber ? parseCurrencyToNumber(val) : (parseFloat(String(val).replace(/[^0-9.-]+/g, '')) || 0);
+        const parsePct = (val) => {
+          if (typeof val === 'number') return val > 1 ? val / 100 : val;
+          const num = parseFloat(String(val).replace('%', '').trim()) || 0;
+          return num > 1 ? num / 100 : num;
+        };
+        const formatCO = (val) => val !== undefined && val !== null ? String(val).trim().padStart(3, '0') : '';
+        const cleanStr = (val) => String(val || '').trim().toUpperCase();
 
-        // Filtrar líneas y vendedores para este CO, Mes y Año
-        const lineasMatch = jsonLineas.filter(l => 
-          formatCO(l.co || l.CO || l.Cod_CO) === co &&
-          cleanStr(l.mes || l.MES) === mes &&
-          String(l.año || l.AÑO || l.anio || l.ANIO || '') === anio
-        );
+        // 🎯 NUEVAS FUNCIONES DE LIMPIEZA DE ESPACIOS
+        const cleanText = (val) => String(val || '').trim().replace(/\s+/g, ' ');
+        const cleanLine = (val) => {
+          const raw = String(val || '').trim();
+          // Quita prefijos numéricos como "0001 - " o "0001-" y luego normaliza los espacios
+          return raw.replace(/^\d{4}\s*-\s*/, '').trim().replace(/\s+/g, ' ');
+        };
 
-        const vendedoresMatch = jsonVendedores.filter(v => 
-          formatCO(v.co || v.CO || v.Cod_CO) === co &&
-          cleanStr(v.mes || v.MES) === mes &&
-          String(v.año || v.AÑO || v.anio || v.ANIO || '') === anio
-        );
+        // 2. CONSOLIDACIÓN DE LAS 3 HOJAS EN FILAS TRANSFORMADAS
+        const transformedRows = [];
 
-        if (lineasMatch.length === 0 || vendedoresMatch.length === 0) return;
+        jsonCO.forEach(rowCO => {
+          const co = formatCO(rowCO.CO || rowCO.co || rowCO.Cod_CO);
+          const mes = cleanStr(rowCO.mes || rowCO.MES);
+          const anio = String(rowCO.año || rowCO.AÑO || rowCO.anio || rowCO.ANIO || '');
+          const pptoTotalCO = parseValue(rowCO.presupuesto || rowCO.Ppto_Vta || rowCO.monto);
 
-        // Suma total de presupuestos de vendedores en este CO para calcular su proporción
-        const totalPptoVendedoresCO = vendedoresMatch.reduce((acc, curr) => 
-          acc + parseValue(curr.presupuesto || curr.Ppto_Vta || curr.monto), 0
-        );
+          if (!co || !mes || !anio || pptoTotalCO <= 0) return;
 
-        // Cruce matricial: Línea x Vendedor
-        lineasMatch.forEach(lineaObj => {
-          const descripLinea = lineaObj.linea || lineaObj.Descrip_Linea || lineaObj.descripLinea || '';
-          const pctLinea = parsePct(lineaObj['%'] || lineaObj.porcentaje || lineaObj.participacion);
-          const montoLinea = pptoTotalCO * pctLinea;
+          // Filtrar líneas y vendedores para este CO, Mes y Año
+          const lineasMatch = jsonLineas.filter(l => 
+            formatCO(l.co || l.CO || l.Cod_CO) === co &&
+            cleanStr(l.mes || l.MES) === mes &&
+            String(l.año || l.AÑO || l.anio || l.ANIO || '') === anio
+          );
 
-          vendedoresMatch.forEach(vendedorObj => {
-            const rzsVendedor = vendedorObj.vendedor || vendedorObj.Rzs_Vendedor || vendedorObj.rzsVendedor || '';
-            const pptoVendedor = parseValue(vendedorObj.presupuesto || vendedorObj.Ppto_Vta || vendedorObj.monto);
+          const vendedoresMatch = jsonVendedores.filter(v => 
+            formatCO(v.co || v.CO || v.Cod_CO) === co &&
+            cleanStr(v.mes || v.MES) === mes &&
+            String(v.año || v.AÑO || v.anio || v.ANIO || '') === anio
+          );
 
-            const pctVendedor = totalPptoVendedoresCO > 0 ? (pptoVendedor / totalPptoVendedoresCO) : 0;
-            const montoFinal = Math.round(montoLinea * pctVendedor);
+          if (lineasMatch.length === 0 || vendedoresMatch.length === 0) return;
 
-            // Estructura exacta requerida para la base de datos
-            transformedRows.push({
-              co,
-              descripLinea,
-              rzsVendedor,
-              mes,
-              anio,
-              monto: montoFinal
+          // Suma total de presupuestos de vendedores en este CO para calcular su proporción
+          const totalPptoVendedoresCO = vendedoresMatch.reduce((acc, curr) => 
+            acc + parseValue(curr.presupuesto || curr.Ppto_Vta || curr.monto), 0
+          );
+
+          // Cruce matricial: Línea x Vendedor
+          lineasMatch.forEach(lineaObj => {
+            const rawLinea = lineaObj.linea || lineaObj.Descrip_Linea || lineaObj.descripLinea || '';
+            // 🎯 Aplica la limpieza para la columna Línea
+            const descripLinea = cleanLine(rawLinea);
+
+            const pctLinea = parsePct(lineaObj['%'] || lineaObj.porcentaje || lineaObj.participacion);
+            const montoLinea = pptoTotalCO * pctLinea;
+
+            vendedoresMatch.forEach(vendedorObj => {
+              const rawVendedor = vendedorObj.vendedor || vendedorObj.Rzs_Vendedor || vendedorObj.rzsVendedor || '';
+              // 🎯 Aplica la limpieza para la columna Vendedor
+              const rzsVendedor = cleanText(rawVendedor);
+
+              const pptoVendedor = parseValue(vendedorObj.presupuesto || vendedorObj.Ppto_Vta || vendedorObj.monto);
+
+              const pctVendedor = totalPptoVendedoresCO > 0 ? (pptoVendedor / totalPptoVendedoresCO) : 0;
+              const montoFinal = Math.round(montoLinea * pctVendedor);
+
+              // Estructura exacta requerida para la base de datos
+              transformedRows.push({
+                co,
+                descripLinea,
+                rzsVendedor,
+                mes,
+                anio,
+                monto: montoFinal
+              });
             });
           });
         });
-      });
 
-      if (transformedRows.length === 0) {
-        Swal.fire({
-          icon: 'warning',
-          title: 'Sin coincidencias',
-          text: 'No se encontraron cruces válidos entre C.O., Mes y Año en las 3 hojas.',
+        if (transformedRows.length === 0) {
+          Swal.fire({
+            icon: 'warning',
+            title: 'Sin coincidencias',
+            text: 'No se encontraron cruces válidos entre C.O., Mes y Año en las 3 hojas.',
+          });
+          return;
+        }
+
+        // 3. ESTADOS Y FILTROS ORIGINALES
+        setPresupuestoListo(transformedRows);
+        setSuggestionsBudget(transformedRows);
+        setCurrentPage(1);
+
+        const uniqueSellers = [...new Set(transformedRows.map(item => item.rzsVendedor).filter(Boolean))];
+        const uniqueLines = [...new Set(transformedRows.map(item => item.descripLinea).filter(Boolean))];
+        const uniqueCities = [...new Set(transformedRows.map(item => item.co).filter(Boolean))];
+        const uniqueYears = [...new Set(transformedRows.map(item => item.anio).filter(Boolean))];
+
+        setFilterOptions({
+          sellers: uniqueSellers,
+          lines: uniqueLines,
+          cities: uniqueCities,
+          years: uniqueYears,
         });
-        return;
+
+        if (uniqueYears.length > 0 && !uniqueYears.includes(filters.year)) {
+          setFilters(prev => ({ ...prev, year: uniqueYears[0] }));
+        }
+
+        setTimeout(() => {
+          Swal.close();
+        }, 800);
+
+      } catch (error) {
+        console.error(error);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error de lectura',
+          text: 'Ocurrió un error al procesar las hojas del Excel.',
+        });
       }
+    };
 
-      // 3. ESTADOS Y FILTROS ORIGINALES
-      setPresupuestoListo(transformedRows);
-      setSuggestionsBudget(transformedRows);
-      setCurrentPage(1);
-
-      const uniqueSellers = [...new Set(transformedRows.map(item => item.rzsVendedor).filter(Boolean))];
-      const uniqueLines = [...new Set(transformedRows.map(item => item.descripLinea).filter(Boolean))];
-      const uniqueCities = [...new Set(transformedRows.map(item => item.co).filter(Boolean))];
-      const uniqueYears = [...new Set(transformedRows.map(item => item.anio).filter(Boolean))];
-
-      setFilterOptions({
-        sellers: uniqueSellers,
-        lines: uniqueLines,
-        cities: uniqueCities,
-        years: uniqueYears,
-      });
-
-      if (uniqueYears.length > 0 && !uniqueYears.includes(filters.year)) {
-        setFilters(prev => ({ ...prev, year: uniqueYears[0] }));
-      }
-
-      setTimeout(() => {
-        Swal.close();
-      }, 800);
-
-    } catch (error) {
-      console.error(error);
-      Swal.fire({
-        icon: 'error',
-        title: 'Error de lectura',
-        text: 'Ocurrió un error al procesar las hojas del Excel.',
-      });
+    // 🎯 ACTIVACIÓN DEL LECTOR SEGÚN EL TIPO DE ARCHIVO
+    if (isTextFile) {
+      reader.readAsText(file, 'UTF-8');
+    } else {
+      reader.readAsBinaryString(file);
     }
   };
-
-  // 🎯 ACTIVACIÓN DEL LECTOR SEGÚN EL TIPO DE ARCHIVO
-  if (isTextFile) {
-    reader.readAsText(file, 'UTF-8');
-  } else {
-    reader.readAsBinaryString(file);
-  }
-};
-
 
   return (
     <div className="container-fluid p-2 stack gap-2" style={{width: isMobile ? '' : '78vw'}}>
@@ -1350,7 +1383,7 @@ export default function Presupuesto() {
         )}
 
       {/* Historial de archivos subidos */}
-      <div className={`panel ${isMobile ? 'p-1 pt-3' : 'p-3'} ms-0 me-0 rounded shadow-sm row align-items-end mb-2 mt-2 gap-0`}>
+      <div className={`panel ${isMobile ? 'p-1 pt-3' : 'p-3'} ms-0 me-0 rounded shadow-sm row align-items-end mb-2 mt-2 gap-0`} style={{maxHeight: 350, overflowY:'auto'}}>
         <div className="d-flex align-items-center gap-2 mb-4">
           <LuHistory 
             size={20} 

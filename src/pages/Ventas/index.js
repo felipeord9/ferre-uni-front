@@ -20,12 +20,15 @@ import {
 } from 'recharts';
 import * as Icons from 'lucide-react';
 import SalesPerformanceDashboard, { BulletBar } from '../../components/BulletBar';
+import { createRecordSale } from '../../services/recordSalesService';
+import { createMultipleSales, findSales, replaceSales } from '../../services/salesService';
+import SellerRankingChart from '../../components/SellerRankingChart';
 import MonthlyMargin from '../../components/MonthlyMargin';
 import { FiUpload } from 'react-icons/fi';
+import Chulo from '../../assets/chulo-verde.png'
 import Select from 'react-select';
 import * as XLSX from 'xlsx';
 import Swal from 'sweetalert2';
-import SellerRankingChart from '../../components/SellerRankingChart';
 
 const COLORES_RANKING_VENDEDORES = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#6f42c1'];
 const COLORES_RANKING_CLIENTES = ['#1cc88a', '#4e73df', '#e74a3b', '#f6c23e', '#36b9cc'];
@@ -396,6 +399,15 @@ export default function Ventas() {
 
   //funcion para determinar el presupuesto global
   useEffect(()=>{
+    Swal.fire({
+      title: 'Cargando',
+      text: `Por favor, espera mientras carga la información...`,
+      allowOutsideClick: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading(); 
+      }
+    });
     findBudgets()
     .then(({data})=>{
       setTotalBudget(data)
@@ -418,7 +430,111 @@ export default function Ventas() {
       const result = suma / datosFiltrados.length;
       setYearMargin(result.toFixed(2))
     })
+    findSales()
+    .then(({data})=>{
+      procesoInicial(data)
+    })
   },[]);
+
+  const procesoInicial = (data) => {
+    const dataNormalized = data.map(item => ({
+      ...item,
+      parsedDate: normalizeDate(item.date) // Agrega el objeto Date limpio
+    }));
+
+    // Guardar datos procesados
+    setRawSalesData(dataNormalized);
+
+    const excludedSellers = [
+      'CEBALLOS ARISTIZABAL IVAN ORLANDO',
+      'CEBALLOS DE BRAVO BERTHA LUCIA'
+    ];
+
+    const initialFilteredRows = dataNormalized.filter(
+      item => !excludedSellers.includes(item.vendedor)
+    );
+
+    setSalesData(initialFilteredRows);
+    setSalesRowsCount(initialFilteredRows.length);
+    setCurrentPage(1);
+
+    // Obtener todos los vendedores para las opciones desplegables
+    const allUniqueSellers = [...new Set(data.map(item => item.vendedor).filter(Boolean))];
+      
+    // Lista inicial preseleccionada sin los excluidos
+    const defaultSelectedSellers = allUniqueSellers.filter(
+      seller => !excludedSellers.includes(seller)
+    );
+
+    const uniqueLines = [...new Set(data.map(item => item.linea).filter(Boolean))];
+    const uniqueCities = [...new Set(data.map(item => item.co).filter(Boolean))];
+    const uniqueClientTypes = [...new Set(data.map(item => item.typeClient).filter(Boolean))];
+    const uniqueSupplier = [...new Set(data.map(item => item.proveedor).filter(Boolean))];
+    const uniqueListPrice = [...new Set(data.map(item => item.descLp).filter(Boolean))];
+      
+    // 🎯 EXTRAER AÑOS ÚNICOS COMPATIBLE CON FORMATO POSTGRESQL / ISO
+    const uniqueYears = [...new Set(data.map(item => {
+      if (!item.date) return null;
+      
+      // 1. Intentar parsear si viene en formato Date o ISO de Postgres (YYYY-MM-DD...)
+      const parsedDate = new Date(item.date);
+      if (!isNaN(parsedDate.getTime())) {
+        return String(parsedDate.getFullYear());
+      }
+
+      // 2. Fallback por si viniera en formato de texto DD/MM/YYYY
+      if (typeof item.date === 'string' && item.date.includes('/')) {
+        const parts = item.date.split('/');
+        return parts.length === 3 ? parts[2] : null;
+      }
+
+      return null;
+    }).filter(Boolean))].sort((a, b) => b - a);
+      
+    const uniqueMonth = mesesConNumero.map(m => m.nombre)
+
+    // Opciones del selector (incluye a todos los vendedores)
+    setFilterOptions({
+      sellers: allUniqueSellers,
+      lines: uniqueLines,
+      cities: uniqueCities,
+      clientTypes: uniqueClientTypes,
+      years: uniqueYears,
+      months: uniqueMonth,
+      suppliers: uniqueSupplier,
+      listPrice: uniqueListPrice,
+    });
+
+    // 🎯 3. DETECTAR AÑO Y MES ACTUAL
+    const today = new Date();
+    const currentYearStr = String(today.getFullYear());
+    const currentMonthNumStr = String(today.getMonth() + 1).padStart(2, '0');
+      
+    const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === currentMonthNumStr);
+    const currentMonthName = currentMonthObj ? currentMonthObj.nombre : null;
+
+    // Determinar año y mes por defecto
+    const defaultYear = uniqueYears.includes(currentYearStr) ? currentYearStr : (uniqueYears[0] || '');
+    const defaultMonthName = (currentMonthName && uniqueMonth.includes(currentMonthName))
+      ? currentMonthName
+      : (uniqueMonth[0] || '');
+
+    // 🎯 4. ACTUALIZAR ESTADO DE FILTROS ACTIVO
+    setFilters(prev => ({
+      ...prev,
+      seller: defaultSelectedSellers,
+      year: defaultYear || prev.year,
+      month: defaultMonthName ? [defaultMonthName] : prev.month // Pasa como Array para tu Select multiselect
+    }));
+
+    // Calculamos KPIs iniciales sobre la data limpia inicial
+    const initialKpis = calculateKPIs(initialFilteredRows);
+    setKpiData(initialKpis);
+
+    setTimeout(() => {
+      Swal.close(); 
+    }, 800); 
+  };
 
   const mesesConNumero = [
     { numero: '01', nombre: "Enero", abreviatura: "Ene" },
@@ -472,44 +588,79 @@ export default function Ventas() {
     return suma;
   };
 
-  const calculateMargin = (mesesInput, year) => {
-    // 1. Normalizar 'mesesInput' a un Array de strings limpios en mayúsculas
-    let selectedMonths = [];
+  const calculateMargin = (mesesInput = [], year, citiesInput = []) => {
+    // Diccionario para convertir nombres a números de mes
+    const monthMap = {
+      'Enero': '1', 'Febrero': '2', 'Marzo': '3', 'Abril': '4',
+      'Mayo': '5', 'Junio': '6', 'Julio': '7', 'Agosto': '8',
+      'Septiembre': '9', 'Octubre': '10', 'Noviembre': '11', 'Diciembre': '12',
+    };
 
-    if (Array.isArray(mesesInput)) {
-      selectedMonths = mesesInput
-        .map(m => (m?.value || m || '').toString().trim().toUpperCase())
-        .filter(Boolean);
-    } else if (mesesInput) {
-      const cleanStr = mesesInput.toString().trim().toUpperCase();
-      if (cleanStr) selectedMonths = [cleanStr];
+    // 1. Extraer MESES y normalizar tanto el texto original como su equivalente numérico
+    const selectedMonths = (Array.isArray(mesesInput) ? mesesInput : [mesesInput])
+      .map(m => (typeof m === 'object' && m !== null ? m.value : m))
+      .filter(Boolean)
+      .map(m => String(m).trim().toUpperCase());
+
+    // Convertimos nombres ("ENERO") a números ("1") para tener ambos formatos disponibles
+    const normalizedMonthNumbers = selectedMonths.map(m => monthMap[m] || m);
+
+    // 2. Extraer y limpiar CIUDADES/C.O.
+    const selectedCities = (Array.isArray(citiesInput) ? citiesInput : [citiesInput])
+      .map(c => (typeof c === 'object' && c !== null ? c.value : c))
+      .filter(Boolean)
+      .map(c => String(c).trim().padStart(3, '0'));
+
+    // 3. Filtrar `totalMargin` de forma aditiva
+    const datosFiltrados = totalMargin.filter(item => {
+      // A. Filtro por AÑO (Obligatorio)
+      if (year && Number(item.anio) !== Number(year)) {
+        return false;
+      }
+
+      // B. Filtro por MES
+      if (selectedMonths.length > 0) {
+        const rawMes = String(item.mes || '').trim();
+        const itemMesText = rawMes.toUpperCase(); // Por si item.mes fuera texto "ENERO"
+        const itemMesNum = String(Number(rawMes) || ''); // Convierte "01" o 1 a "1"
+
+        // Compara contra textos ("ENERO") o contra números ("1")
+        const matchMonth = 
+          selectedMonths.includes(itemMesText) || 
+          normalizedMonthNumbers.includes(itemMesNum) ||
+          normalizedMonthNumbers.includes(rawMes);
+
+        if (!matchMonth) return false;
+      }
+
+      // C. Filtro por CIUDAD/C.O.
+      if (selectedCities.length > 0) {
+        const itemCo = String(item.co || '').trim().padStart(3, '0');
+        const matchCity = selectedCities.includes(itemCo);
+        if (!matchCity) return false;
+      }
+
+      return true;
+    });
+
+    // 4. Si no hay coincidencias tras aplicar los filtros
+    if (datosFiltrados.length === 0) {
+      const fallback = Number(yearMargin) || 0;
+      setYearBudget(fallback.toFixed(2));
+      return fallback;
     }
 
-    // 2. Filtrar presupuestos por año
-    let datosFiltrados = totalMargin.filter(
-      item => Number(item.anio) === Number(year)
-    );
-
-    // 3. Si hay meses seleccionados, filtrar adicionalmente por esos meses
-    if (selectedMonths.length > 0) {
-      datosFiltrados = datosFiltrados.filter(item => {
-        const itemMes = item.mes ? String(item.mes).trim().toUpperCase() : '';
-        return selectedMonths.includes(itemMes);
-      });
-    }
-
-    // 4. Sumar los montos
+    // 5. Calcular promedio exacto de los datos filtrados
     const suma = datosFiltrados.reduce((acumulador, item) => {
-      const montoNumerico = Number(item.expectedMargin) || 0;
-      return acumulador + montoNumerico;
+      return acumulador + (Number(item.expectedMargin) || 0);
     }, 0);
 
-    // 5. hallar la margen final
-    const result= suma / datosFiltrados.length;
+    const result = suma / datosFiltrados.length;
+    const marginFormatted = parseFloat(result.toFixed(2));
 
-    // 5. Actualizar estado y retornar
-    setYearBudget(result.toFixed(2));
-    return result.toFixed(2);
+    // 6. Actualizar estado y retornar
+    setYearBudget(marginFormatted.toFixed(2));
+    return marginFormatted;
   };
 
   const parseCurrencyToNumber = (value) => {
@@ -529,7 +680,7 @@ export default function Ventas() {
   };
 
   // Función para calcular los KPIs basados en el listado actual de datos
-    const calculateKPIs = (rows, expectedMargin = yearMargin) => {
+    const calculateKPIs = (rows, expectedMargin) => {
     if (!rows || rows.length === 0) {
         return { totalSales: '$0', goalProgress: '0%', invoices: '0', customers: '0', margen: '0%' };
     }
@@ -545,7 +696,10 @@ export default function Ventas() {
     const uniqueCustomers = new Set(rows.map(row => row.cliente).filter(Boolean)).size;
 
     // 4. CÁLCULO DEL MARGEN BRUTO REAL PONDERADO (%)
-    const suMargen = calculateMargin(filters.month, filters.year)
+    const margenFill = rows.reduce((sum, row) => sum + (Number(row.margen) || 0), 0);
+    const rowsMargen = rows.length
+    const suMargen = margenFill / rowsMargen
+    expectedMargin = calculateMargin(filters.month, filters.year, filters.city)
     /* const suMargen = rows.reduce((sum, row) => sum + (parseFloat(row.margen) || 0), 0);
     const calculateMargen = suMargen / rows.length; */
 
@@ -566,7 +720,7 @@ export default function Ventas() {
         goalProgress: `${porcentajeMeta.toFixed(2)}%`,
         invoices: uniqueInvoices.toLocaleString('es-CO'),
         customers: uniqueCustomers.toLocaleString('es-CO'),
-        margen: `${suMargen}%`,
+        margen: `${suMargen.toFixed(2)}%`,
         expectedMargin: expectedMargin,
         marginStatus: marginStatus,
     };
@@ -586,7 +740,7 @@ export default function Ventas() {
       
       // Validamos que sea una fecha correcta
       if (!isNaN(dateObj.getTime())) {
-        const day = String(dateObj.getDate()).padStart(2, '0');
+        const day = String(dateObj.getDate() + 1).padStart(2, '0');
         const month = String(dateObj.getMonth() + 1).padStart(2, '0'); // Los meses van de 0 a 11
         const year = dateObj.getFullYear();
         
@@ -609,33 +763,25 @@ export default function Ventas() {
     if (!file) return;
     setSelectedFile(file);
 
-    const isTextFile = file.name.endsWith('.txt') || file.name.endsWith('.csv');
-
     Swal.fire({
       title: 'Procesando archivo',
-      text: `Por favor, espera mientras se lee el archivo ${isTextFile ? 'de texto' : 'Excel'}...`,
+      text: 'Por favor, espera mientras se lee el archivo Excel...',
       allowOutsideClick: false,
       showConfirmButton: false,
       didOpen: () => {
-        Swal.showLoading(); 
+        Swal.showLoading();
       }
     });
 
     const reader = new FileReader();
-    
+
     reader.onload = (event) => {
       const data = event.target.result;
-      let workbook;
+      const workbook = XLSX.read(data, { type: 'binary' });
 
-      if (isTextFile) {
-        workbook = XLSX.read(data, { type: 'string', codepage: 65001 });
-      } else {
-        workbook = XLSX.read(data, { type: 'binary' });
-      }
-      
       const workSheetName = workbook.SheetNames[0];
       const workSheet = workbook.Sheets[workSheetName];
-      
+
       const jsonRows = XLSX.utils.sheet_to_json(workSheet);
       if (jsonRows.length === 0) {
         Swal.fire({
@@ -671,15 +817,19 @@ export default function Ventas() {
         "Desc. lista de precios": "descLp"
       };
 
+      // Transformación en UN SOLO PASO limpia y sin errores de clave
       const transformedRows = jsonRows.map(row => {
         const newRow = {};
+        
         for (const originalKey in row) {
           const newKey = columnMapping[originalKey] || originalKey;
           
           if (newKey === 'valor' || newKey === 'subtotal') {
             newRow[newKey] = parseCurrencyToNumber(row[originalKey]);
           } else if (newKey === 'date') {
-            newRow[newKey] = parseExcelDate(row[originalKey]);
+            // Guardamos la fecha original parsed o la convertida
+            const formattedDate = parseExcelDate(row[originalKey]);
+            newRow[newKey] = formattedDate;
           } else if (newKey === 'co') {
             const originalValue = row[originalKey];
             newRow[newKey] = originalValue !== undefined && originalValue !== null
@@ -688,20 +838,31 @@ export default function Ventas() {
           } else if (newKey === 'linea') {
             const originalValue = String(row[originalKey] || '').trim();
             newRow[newKey] = originalValue.replace(/^\d{4}\s*-\s*/, '').trim();
-          }else {
+          } else if (newKey === 'vendedor' || newKey === 'typeClient' || newKey === 'proveedor') {
+            const originalValue = String(row[originalKey] || '');
+            newRow[newKey] = originalValue.trim().replace(/\s+/g, ' ');
+          } else {
             newRow[newKey] = row[originalKey];
           }
         }
+
+        // Asignar parsedDate correctamente después de que 'date' ha sido normalizada
+        if (typeof normalizeDate === 'function') {
+          newRow.parsedDate = normalizeDate(newRow.date);
+        } else {
+          newRow.parsedDate = null;
+        }
+
         return newRow;
       });
+
+      setRawSalesData(transformedRows);
 
       // 🎯 1. VENDEDORES A EXCLUIR EN LA VISTA INICIAL
       const excludedSellers = [
         'CEBALLOS ARISTIZABAL IVAN ORLANDO',
         'CEBALLOS DE BRAVO BERTHA LUCIA'
       ];
-
-      setRawSalesData(transformedRows);
 
       // 🎯 2. FILTRAR REGISTROS INICIALES SIN DICHOS VENDEDORES
       const initialFilteredRows = transformedRows.filter(
@@ -712,13 +873,8 @@ export default function Ventas() {
       setSalesRowsCount(initialFilteredRows.length);
       setCurrentPage(1); 
 
-      // Obtener todos los vendedores para las opciones desplegables
       const allUniqueSellers = [...new Set(transformedRows.map(item => item.vendedor).filter(Boolean))];
-      
-      // Lista inicial preseleccionada sin los excluidos
-      const defaultSelectedSellers = allUniqueSellers.filter(
-        seller => !excludedSellers.includes(seller)
-      );
+      const defaultSelectedSellers = allUniqueSellers.filter(seller => !excludedSellers.includes(seller));
 
       const uniqueLines = [...new Set(transformedRows.map(item => item.linea).filter(Boolean))];
       const uniqueCities = [...new Set(transformedRows.map(item => item.co).filter(Boolean))];
@@ -726,24 +882,27 @@ export default function Ventas() {
       const uniqueSupplier = [...new Set(transformedRows.map(item => item.proveedor).filter(Boolean))];
       const uniqueListPrice = [...new Set(transformedRows.map(item => item.descLp).filter(Boolean))];
       
+      // Obtención segura de Años
       const uniqueYears = [...new Set(transformedRows.map(item => {
         if (!item.date) return null;
-        const parts = item.date.split('/');
-        return parts.length === 3 ? parts[2] : null;
+        
+        // Si date viene como string DD/MM/YYYY
+        if (typeof item.date === 'string' && item.date.includes('/')) {
+          const parts = item.date.split('/');
+          return parts.length === 3 ? parts[2] : null;
+        }
+
+        // Si date viene en formato ISO o JavaScript Date
+        const parsedDate = new Date(item.date);
+        if (!isNaN(parsedDate.getTime())) {
+          return String(parsedDate.getFullYear());
+        }
+
+        return null;
       }).filter(Boolean))].sort((a, b) => b - a);
       
-      const uniqueMonth = mesesConNumero.map(m => m.nombre)/* [...new Set(transformedRows.map(item => {
-        if (!item.date) return null;
-        const parts = item.date.split('/');
-        const mes = parts.length === 3 ? parts[1].padStart(2, '0') : null;
-        if (mes) {
-          const look = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === mes);
-          return look ? look.nombre : null;
-        }
-        return null;
-      }).filter(Boolean))]; */
+      const uniqueMonth = mesesConNumero.map(m => m.nombre);
 
-      // Opciones del selector (incluye a todos los vendedores)
       setFilterOptions({
         sellers: allUniqueSellers,
         lines: uniqueLines,
@@ -763,7 +922,6 @@ export default function Ventas() {
       const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === currentMonthNumStr);
       const currentMonthName = currentMonthObj ? currentMonthObj.nombre : null;
 
-      // Determinar año y mes por defecto
       const defaultYear = uniqueYears.includes(currentYearStr) ? currentYearStr : (uniqueYears[0] || '');
       const defaultMonthName = (currentMonthName && uniqueMonth.includes(currentMonthName))
         ? currentMonthName
@@ -774,10 +932,9 @@ export default function Ventas() {
         ...prev,
         seller: defaultSelectedSellers,
         year: defaultYear || prev.year,
-        month: defaultMonthName ? [defaultMonthName] : prev.month // Pasa como Array para tu Select multiselect
+        month: defaultMonthName ? [defaultMonthName] : prev.month
       }));
 
-      // Calculamos KPIs iniciales sobre la data limpia inicial
       const initialKpis = calculateKPIs(initialFilteredRows);
       setKpiData(initialKpis);
 
@@ -786,11 +943,48 @@ export default function Ventas() {
       }, 800); 
     };
 
-    if (isTextFile) {
-      reader.readAsText(file, 'UTF-8');
-    } else {
-      reader.readAsBinaryString(file);
+    reader.readAsBinaryString(file);
+  };
+
+  // Detecta automáticamente si es texto de Excel (DD/MM/YYYY), string de DB (YYYY-MM-DD...) o Date
+  const normalizeDate = (rawDate) => {
+    if (!rawDate) return null;
+
+    // Si ya es un objeto Date válido
+    if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+      return rawDate;
     }
+
+    if (typeof rawDate === 'string') {
+      const trimmed = rawDate.trim();
+
+      // 1. Caso EXCEL / Formato Latino: "22/12/2025"
+      if (trimmed.includes('/')) {
+        const parts = trimmed.split('/');
+        if (parts.length === 3) {
+          const day = parseInt(parts[0], 10) - 1;
+          const month = parseInt(parts[1], 10) - 1; // En JS los meses son 0-11
+          const year = parseInt(parts[2], 10);
+          return new Date(year, month, day);
+        }
+      }
+
+      // 2. Caso BASE DE DATOS / ISO: "2025-11-13 19:00:00-05" o "2025-11-13"
+      if (trimmed.includes('-')) {
+        const datePart = trimmed.split(' ')[0]; // Extrae "2025-11-13"
+        const parts = datePart.split('-');
+        if (parts.length === 3) {
+          const year = parseInt(parts[0], 10);
+          const month = parseInt(parts[1], 10) - 1;
+          const day = parseInt(parts[2], 10) - 1;
+          return new Date(year, month, day);
+        }
+      }
+    }
+
+    // Intento de parseo por defecto si el formato varía
+    const fallbackDate = new Date(rawDate);
+    return !isNaN(fallbackDate.getTime()) ? fallbackDate : null;
   };
 
   useEffect(() => {
@@ -799,49 +993,44 @@ export default function Ventas() {
     // 1. FILTRO DE AÑO
     if (filters.year) {
       filtered = filtered.filter(row => {
-        if (!row.date) return false;
-        const parts = row.date.split('/');
-        return parts.length === 3 && parts[2] === filters.year;
+        if (!row.parsedDate) return false;
+        return String(row.parsedDate.getFullYear()) === String(filters.year);
       });
     }
 
     // 2. FILTRO DE MES
     if (filters.month && filters.month.length > 0) {
+      const selectedMonthNames = filters.month.map(m => m.value || m);
+
       filtered = filtered.filter(row => {
-        if (!row.date) return false;
-        const parts = row.date.split('/');
-        
-        if (parts.length !== 3) return false;
-
-        const numMes = parts[1]; // Ej: "01", "02", etc.
-
-        // 1. Buscamos el nombre del mes correspondiente en tu array auxiliar
-        const monthObj = mesesConNumero.find(m => m.numero === numMes);
-        if (!monthObj) return false;
-
-        // 2. Si el multiselect guarda objetos { value: 'Enero', label: 'Enero' } o strings 'Enero':
-        // extraemos el valor puro para asegurarnos
-        const selectedMonthNames = filters.month.map(m => m.value || m);
-
-        // 3. Verificamos si el nombre del mes de la fila está en los seleccionados
-        return selectedMonthNames.includes(monthObj.nombre);
+        if (!row.parsedDate){
+          return false
+        } else if(row.parsedDate) {
+          // Obtener el número del mes ("01", "02", ..., "12")
+          const monthNum = String(row.parsedDate.getMonth() + 1).padStart(2, '0');
+          const monthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === monthNum);
+  
+          return monthObj ? selectedMonthNames.includes(monthObj.nombre) : false;
+        } 
       });
     }
 
     // 3. FILTRO POR RANGO DE FECHAS (startDate y endDate)
     if (filters.startDate || filters.endDate) {
       filtered = filtered.filter(row => {
-        if (!row.date) return false;
-        const parts = row.date.split('/');
-        if (parts.length !== 3) return false;
-        const rowDate = new Date(parts[2], parts[1] - 1, parts[0]);
+        if (!row.parsedDate) return false;
+
+        const rowDate = row.parsedDate;
 
         if (filters.startDate) {
-          const start = new Date(filters.startDate + 'T00:00:00');
+          const [sYear, sMonth, sDay] = filters.startDate.split('-').map(Number);
+          const start = new Date(sYear, sMonth - 1, sDay, 0, 0, 0);
           if (rowDate < start) return false;
         }
+
         if (filters.endDate) {
-          const end = new Date(filters.endDate + 'T23:59:59');
+          const [eYear, eMonth, eDay] = filters.endDate.split('-').map(Number);
+          const end = new Date(eYear, eMonth - 1, eDay, 23, 59, 59);
           if (rowDate > end) return false;
         }
 
@@ -849,55 +1038,26 @@ export default function Ventas() {
       });
     }
 
-    // 🎯 4. FILTROS MÚLTIPLES (Usando .includes)
-
-    // Vendedor múltiple
-    if (filters.seller && filters.seller.length > 0) {
+    // 🎯 4. OTROS FILTROS (Vendedor, Línea, Agencia, etc.)
+    if (filters.seller?.length > 0) {
       filtered = filtered.filter(row => filters.seller.includes(row.vendedor));
     }
-
-    // Línea múltiple
-    if (filters.line && filters.line.length > 0) {
+    if (filters.line?.length > 0) {
       filtered = filtered.filter(row => filters.line.includes(row.linea));
     }
-
-    // Agencia (Ciudad) múltiple
-    if (filters.city && filters.city.length > 0) {
+    if (filters.city?.length > 0) {
       filtered = filtered.filter(row => filters.city.includes(row.co));
     }
-
-    // Tipo de cliente múltiple
-    if (filters.clientType && filters.clientType.length > 0) {
+    if (filters.clientType?.length > 0) {
       filtered = filtered.filter(row => filters.clientType.includes(row.typeClient));
     }
 
-    // 🎯 5. CÁLCULO DE LA RENTABILIDAD ESPERADA (MARGEN META)
-    let expectedMargin = yearMargin; // Valor por defecto si no hay C.O. seleccionado o hay varios
-
-    const selectedCities = (filters.city || []).map(c => c.value || c);
-
-    if (selectedCities.length === 1) {
-      const selectedCo = String(selectedCities[0]).padStart(3, '0');
-      /* const coMatch = marginsData.find(m => String(m.co).padStart(3, '0') === selectedCo); */
-
-      const datosFiltrados = totalMargin.filter(m => String(m.co).padStart(3, '0') === selectedCo);
-      const suma = datosFiltrados.reduce((acumulador, item) => {
-        const montoNumerico = Number(item.expectedMargin) || 0;
-        return acumulador + montoNumerico;
-      }, 0);
-      const result = suma / datosFiltrados.length;
-      
-      if (result) {
-        expectedMargin = parseFloat(result.toFixed(2));
-      }
-    }
-
-    // Actualización de estado
+    // Actualización de estado y KPIs
     setSalesData(filtered);
     setSalesRowsCount(filtered.length);
     setCurrentPage(1);
 
-    const filteredKpis = calculateKPIs(filtered, expectedMargin);
+    const filteredKpis = calculateKPIs(filtered, yearMargin);
     setKpiData(filteredKpis);
 
   }, [filters, rawSalesData]);
@@ -1226,12 +1386,12 @@ export default function Ventas() {
     ];
 
     const salesByCo = {};
-    const marginSumByCo = {};  // Acumula la suma de % de margen
+    const marginSumByCo = {};   // Acumula la suma de % de margen
     const marginCountByCo = {}; // Acumula la cantidad de registros por C.O.
     const budgetByCo = {};
     const expectedMarginByCo = {};
 
-    // --- 1. RESOLVER EL/LOS MESES SELECCIONADOS EN UN SET DE NÚMEROS ---
+    // --- 1. RESOLVER EL/LOS MESES SELECCIONADOS EN UN SET DE NÚMEROS (1-12) ---
     const filterArray = Array.isArray(monthFilters) ? monthFilters : (monthFilters ? [monthFilters] : []);
     const targetMonthNums = new Set();
 
@@ -1264,45 +1424,78 @@ export default function Ventas() {
     const parseCurrency = (val) => {
       if (typeof val === 'number') return val;
       if (!val) return 0;
-      // Remueve $, puntos de miles y cambia coma decimal por punto
       const cleanStr = String(val).replace(/\$/g, '').replace(/\./g, '').replace(',', '.').trim();
       return parseFloat(cleanStr) || 0;
+    };
+
+    // Helper local para extraer { year, monthNum } (donde monthNum es 1-12)
+    const getYearAndMonthNum = (row) => {
+      // 1. Si ya se normalizó previamente a parsedDate
+      if (row.parsedDate instanceof Date && !isNaN(row.parsedDate.getTime())) {
+        return {
+          year: String(row.parsedDate.getFullYear()),
+          monthNum: row.parsedDate.getMonth() + 1 // Convertimos de 0-11 a 1-12
+        };
+      }
+
+      const dateVal = row.Fecha || row.fecha || row.date;
+      if (!dateVal) return { year: null, monthNum: null };
+
+      const dateStr = String(dateVal).trim();
+
+      // 2. Si viene de PostgreSQL / ISO ("2025-11-13 19:00:00-05" o "2025-11-13")
+      if (dateStr.includes('-')) {
+        const datePart = dateStr.split(' ')[0]; // "2025-11-13"
+        const parts = datePart.split('-');
+        if (parts.length === 3) {
+          return {
+            year: parts[0],
+            monthNum: parseInt(parts[1], 10)
+          };
+        }
+      }
+
+      // 3. Si viene de Excel / Latino ("13/11/2025")
+      if (dateStr.includes('/')) {
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          return {
+            year: parts[2],
+            monthNum: parseInt(parts[1], 10)
+          };
+        }
+      }
+
+      return { year: null, monthNum: null };
     };
 
     // --- 2. PROCESAR VENTAS Y SUMA DE MÁRGENES ---
     if (salesRows && salesRows.length > 0) {
       salesRows.forEach(row => {
-        // Soporta "Fecha" o "date"
-        const dateVal = row.Fecha || row.fecha || row.date;
-        if (!dateVal) return;
+        const { year: rowYear, monthNum: rowMonth } = getYearAndMonthNum(row);
+        if (!rowYear || !rowMonth) return;
 
-        const parts = String(dateVal).split('/');
-        if (parts.length === 3) {
-          const rowMonth = parseInt(parts[1], 10);
-          const rowYear = parts[2];
+        const matchYear = !selectedYear || String(rowYear) === String(selectedYear);
+        const matchMonth = targetMonthNums.size === 0 || targetMonthNums.has(rowMonth);
 
-          const matchYear = !selectedYear || String(rowYear) === String(selectedYear);
-          const matchMonth = targetMonthNums.size === 0 || targetMonthNums.has(rowMonth);
+        if (matchYear && matchMonth) {
+          // Soporta "C.O.", "co" o "CO"
+          const coKey = formatCo(row['C.O.'] ?? row.co ?? row.CO);
 
-          if (matchYear && matchMonth) {
-            // Soporta "C.O.", "co" o "CO"
-            const coKey = formatCo(row['C.O.'] ?? row.co ?? row.CO);
-            
-            if (coKey) {
-              // Valor de la venta (Subtotal o Venta)
-              const valor = parseCurrency(row['Valor subtotal'] || row.valor || row.subtotal);
-              
-              // Margen (Busca 'Márgen promedio', 'Margen promedio', 'margen', etc.)
-              const rawMargen = row['Márgen promedio'] ?? row['Margen promedio'] ?? row.margen ?? '0';
-              const margenPct = parseFloat(String(rawMargen).replace(',', '.')) || 0;
+          if (coKey) {
+            // Valor de la venta (Subtotal o Venta)
+            const valor = parseCurrency(row['Valor subtotal'] || row.valor || row.subtotal);
 
-              // Acumulado de ventas totales $
-              salesByCo[coKey] = (salesByCo[coKey] || 0) + valor;
+            // Margen
+            const rawMargen = row['Márgen promedio'] ?? row['Margen promedio'] ?? row.margen ?? '0';
+            const margenPct = parseFloat(String(rawMargen).replace(',', '.')) || 0;
 
-              // Acumulado de la suma de márgenes y conteo de registros
-              marginSumByCo[coKey] = (marginSumByCo[coKey] || 0) + margenPct;
-              marginCountByCo[coKey] = (marginCountByCo[coKey] || 0) + 1;
-            }
+            // Acumulado de ventas totales $
+            salesByCo[coKey] = (salesByCo[coKey] || 0) + valor;
+
+            // Acumulado de la suma de márgenes y conteo de registros
+            marginSumByCo[coKey] = (marginSumByCo[coKey] || 0) + margenPct;
+            marginCountByCo[coKey] = (marginCountByCo[coKey] || 0) + 1;
           }
         }
       });
@@ -1325,7 +1518,7 @@ export default function Ventas() {
     // --- 4. UNIFICAR RESULTADOS Y PROMEDIO SIMPLE ---
     return nombresCo.map(co => {
       const totalVentas = Math.round(salesByCo[co] || 0);
-      
+
       // Promedio simple del margen = (Suma de Márgenes) / (Número de Registros)
       const totalMarginSum = marginSumByCo[co] || 0;
       const totalCount = marginCountByCo[co] || 0;
@@ -1369,31 +1562,64 @@ export default function Ventas() {
     const budgetByMonth = {};
     const expectedMarginByMonth = {};
 
-    // 1. Procesar Ventas y Utilidad Real (Acumula por índice de mes 0-11)
+    // Helper local para extraer { year, monthIndex } sin importar si viene de DB o Excel
+    const getYearAndMonthIndex = (row) => {
+      // 1. Si ya tiene la propiedad parsedDate (creada en la normalización)
+      if (row.parsedDate instanceof Date && !isNaN(row.parsedDate.getTime())) {
+        return {
+          year: String(row.parsedDate.getFullYear()),
+          monthIndex: row.parsedDate.getMonth() // 0 a 11
+        };
+      }
+
+      if (!row.date) return { year: null, monthIndex: null };
+
+      const dateStr = String(row.date).trim();
+
+      // 2. Si viene de PostgreSQL / ISO ("2025-11-13 19:00:00-05" o "2025-11-13")
+      if (dateStr.includes('-')) {
+        const datePart = dateStr.split(' ')[0]; // "2025-11-13"
+        const parts = datePart.split('-');
+        if (parts.length === 3) {
+          return {
+            year: parts[0],
+            monthIndex: parseInt(parts[1], 10) - 1
+          };
+        }
+      }
+
+      // 3. Si viene de Excel / Latino ("22/12/2025")
+      if (dateStr.includes('/')) {
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          return {
+            year: parts[2],
+            monthIndex: parseInt(parts[1], 10) - 1
+          };
+        }
+      }
+
+      return { year: null, monthIndex: null };
+    };
+
+    // 1. Procesar Ventas y Utilidad Real
     if (salesRows && salesRows.length > 0) {
       salesRows.forEach(row => {
-        if (!row.date) return;
-        const parts = row.date.split('/');
-        if (parts.length === 3) {
-          const rowYear = parts[2];
-          if (String(rowYear) === String(selectedYear)) {
-            const rowMonth = parseInt(parts[1], 10) - 1; // Base 0 (0 a 11)
-            
-            if (rowMonth >= 0 && rowMonth <= 11) {
-              const valor = Number(row.valor || row.subtotal) || 0;
-              // Parse del margen (soporta decimales con coma o punto)
-              const margenPct = parseFloat(String(row.margen || '0').replace(',', '.')) || 0;
+        const { year, monthIndex } = getYearAndMonthIndex(row);
 
-              salesByMonth[rowMonth] = (salesByMonth[rowMonth] || 0) + valor;
-              // Utilidad bruta acumulada para cálculo de margen ponderado
-              utilityByMonth[rowMonth] = (utilityByMonth[rowMonth] || 0) + (valor * (margenPct / 100));
-            }
+        if (year && String(year) === String(selectedYear)) {
+          if (monthIndex >= 0 && monthIndex <= 11) {
+            const valor = Number(row.valor || row.subtotal) || 0;
+            const margenPct = parseFloat(String(row.margen || '0').replace(',', '.')) || 0;
+
+            salesByMonth[monthIndex] = (salesByMonth[monthIndex] || 0) + valor;
+            utilityByMonth[monthIndex] = (utilityByMonth[monthIndex] || 0) + (valor * (margenPct / 100));
           }
         }
       });
     }
 
-    // 2. Procesar Metas y Presupuestos por Mes (Acumula por Nombre en Mayúsculas: "ENERO", "FEBRERO"...)
+    // 2. Procesar Metas y Presupuestos por Mes
     if (marginRows && marginRows.length > 0) {
       marginRows.forEach(item => {
         const itemAnio = item.anio || item.year || selectedYear;
@@ -1404,7 +1630,6 @@ export default function Ventas() {
 
           if (monthName) {
             budgetByMonth[monthName] = (budgetByMonth[monthName] || 0) + presupuesto;
-            // Si hay varias filas del mismo mes, guardamos/promediamos la rentabilidad esperada
             if (renEsperada > 0) {
               expectedMarginByMonth[monthName] = renEsperada;
             }
@@ -1415,30 +1640,27 @@ export default function Ventas() {
 
     // 3. Unificar ambos flujos cruzando los 12 meses
     return nombresMesesCortos.map((shortName, index) => {
-      const fullName = nombresMesesLargos[index]; // Obtenemos "ENERO" para index 0, "FEBRERO" para index 1, etc.
+      const fullName = nombresMesesLargos[index];
 
       const totalVentas = Math.round(salesByMonth[index] || 0);
       const totalUtilidad = utilityByMonth[index] || 0;
 
-      // Margen Ponderado Real % del mes
       const margenRealPct = totalVentas > 0 ? (totalUtilidad / totalVentas) * 100 : 0;
 
-      // Metas del mes
       const metaPresupuesto = Math.round(budgetByMonth[fullName] || 0);
-      const metaRentabilidad = expectedMarginByMonth[fullName] || 27; // 27% por defecto si no se especifica en la tabla
+      const metaRentabilidad = expectedMarginByMonth[fullName] || 27;
 
-      // Cumplimientos %
       const cumplimientoVentasPct = metaPresupuesto > 0 ? (totalVentas / metaPresupuesto) * 100 : 0;
       const cumplimientoMargenPct = metaRentabilidad > 0 ? (margenRealPct / metaRentabilidad) * 100 : 0;
 
       return {
-        name: shortName,                          // "Ene", "Feb", etc.
-        fullName: fullName,                       // "ENERO", "FEBRERO", etc.
-        Ventas: totalVentas,                      // Venta real acumulada $
-        Presupuesto: metaPresupuesto,             // Presupuesto meta $
+        name: shortName,
+        fullName: fullName,
+        Ventas: totalVentas,
+        Presupuesto: metaPresupuesto,
         cumplimientoVentasPct: Number(cumplimientoVentasPct.toFixed(2)),
-        Rentabilidad: Number(margenRealPct.toFixed(2)), // Margen ponderado real %
-        MetaRentabilidad: metaRentabilidad,             // Rentabilidad meta %
+        Rentabilidad: Number(margenRealPct.toFixed(2)),
+        MetaRentabilidad: metaRentabilidad,
         cumplimientoMargenPct: Number(cumplimientoMargenPct.toFixed(2))
       };
     });
@@ -1715,6 +1937,134 @@ export default function Ventas() {
     </text>
   );
 
+  //funcion para reemplazar crear nuevos registros de ventas.
+  const handleCreateSales = (e) => {
+    e.preventDefault();
+    if(rawSalesData.length > 0){
+      Swal.fire({
+        title: 'Subiendo información',
+        text: `Por favor, espera mientras se guarda la información en nuestra base de datos...`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => {
+          Swal.showLoading(); 
+        }
+      });
+      createMultipleSales(rawSalesData)
+        const complete = rawSalesData
+        .then(()=>{
+          const inf = {
+            date: new Date(),
+            uploadBy: user.name,
+            rows: rawSalesData.length,
+            mode: 'Agregar/Actualizar',
+          }
+          createRecordSale(inf)
+          .catch(()=>{
+            console.log('error')
+          })
+          Swal.fire({
+            imageUrl: Chulo,
+            imageWidth: 100,
+            title: '¡Correcto!',
+            text: 'Se han agregado los nuevos presupuestos al sistema',
+            showConfirmButton: false,
+            timer: 5000,
+            customClass: {
+              image: 'mb-0 mt-3 pb-0',
+              title: 'mt-1 pt-0'
+            }
+          })
+          .then(()=>{
+            window.location.reload();
+          })
+          /* setNewBudget([]) */
+          /* getBudgets(); */
+        })
+        .catch((error)=>{
+          Swal.fire({
+            icon: 'warning',
+            title: '¡ERROR!',
+            text: `${error}`/* 'Ha ocurrido un error al momento de agregar los nuevos presupuestos, vuelvelo a intentar mas tarde.' */,
+            showConfirmButton: true,
+            confirmButtonColor: 'red',
+            confirmButtonText: 'OK'
+          })
+        })
+    }else {
+      Swal.fire({
+        icon: 'warning',
+        title: '¡ATENCION!',
+        text: 'no hay información nuevo por agregar',
+        showConfirmButton: false,
+        timmer: 5000
+      })
+    }
+  }
+  
+  const handleReplaceSales = (e) => {
+    e.preventDefault();
+    if(rawSalesData.length > 0){
+      Swal.fire({
+        title: 'Subiendo información',
+        text: `Por favor, espera mientras se guarda la información en nuestra base de datos...`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => {
+          Swal.showLoading(); 
+        }
+      });
+      replaceSales(rawSalesData)
+        .then(()=>{
+          const inf = {
+            date: new Date(),
+            uploadBy: user.name,
+            rows: rawSalesData.length,
+            mode: 'Reemplazar Todo',
+          }
+          createRecordSale(inf)
+          .catch(()=>{
+            console.log('error')
+          })
+          Swal.fire({
+            imageUrl: Chulo,
+            imageWidth: 100,
+            title: '¡Correcto!',
+            text: 'Se han reemplazado los presupuestos en el sistema',
+            showConfirmButton: false,
+            timer: 5000,
+            customClass: {
+              image: 'mb-0 mt-3 pb-0',
+              title: 'mt-1 pt-0'
+            }
+          })
+          .then(()=>{
+            window.location.reload();
+          })
+          /* setNewBudget([]) */
+          /* getBudgets(); */
+        })
+        .catch((error)=>{
+          Swal.fire({
+            icon: 'warning',
+            title: '¡ERROR!',
+            text: `${error}`/* 'Ha ocurrido un error al momento de reemplazar los presupuestos, vuelvelo a intentar mas tarde.' */,
+            showConfirmButton: true,
+            confirmButtonColor: 'red',
+            confirmButtonText: 'OK'
+          })
+        })
+    }else {
+      Swal.fire({
+        icon: 'warning',
+        title: '¡ATENCION!',
+        text: 'no hay información nuevo por agregar',
+        showConfirmButton: false,
+        timmer: 5000
+      })
+    }
+  }
+
   return (
     <div className="container-fluid p-2 stack gap-4 w-100">
       
@@ -1762,11 +2112,22 @@ export default function Ventas() {
           </div>
 
           {/* Botones de Acción */}
-          {/* <div className="d-flex flex-column flex-md-row justify-content-end align-items-md-center gap-3">
+          <div className={`${isMobile ? 'flex-column' : 'flex-row'} d-flex gap-2 mt-2 justify-content-end`}>
             <button 
-              onMouseEnter={() => setIsHoveredUpload(true)}
-              onMouseLeave={() => setIsHoveredUpload(false)}
-              className="btn fw-semibold"
+              className="btn d-flex align-items-center fw-bold btn-sm btn-outline-success"
+              style={{ 
+                border: `1px solid ${colors.success}`,
+                borderRadius: '6px',
+                fontSize: '0.85rem',
+                padding: '6px 12px'
+              }}
+              onClick={(e)=>handleReplaceSales(e)}
+            >
+              <MdRefresh className="me-2" size={18} /> Reemplazar todo
+            </button>
+          
+            <button 
+              className="btn d-flex align-items-center fw-bold btn-sm btn-outline-success"
               style={{
                 color: isHoveredUpload ? '#ffffff' : '#475569',
                 backgroundColor: isHoveredUpload ? '#9fa8da' : 'transparent',
@@ -1775,15 +2136,17 @@ export default function Ventas() {
                 transition: 'all 0.2s ease', // Suaviza la transición al pasar el cursor
                 fontSize: '0.9rem'
               }}
-              onClick={(e)=>handleuploadInfo(e)}
+              onMouseEnter={() => setIsHoveredUpload(true)}
+              onMouseLeave={() => setIsHoveredUpload(false)}
+              onClick={(e)=>handleCreateSales(e)}
             >
-              <FiUpload className="me-2" size={18} /> Subir ventas
+              <MdAddCircle className="me-2" size={18} /> Agregar / Actualizar
             </button>
-          </div> */}
-
+          </div>
         </div>
-
       }
+
+{/* {JSON.stringify(rawSalesData.map((item)=>`${item.fecha} - ${item.parsedDate}`))} */}
 
       {/* TOOLBAR DE FILTROS */}
       <div className="toolbar p-2 rounded shadow-sm row align-items-end mb-4 gap-0">
@@ -2113,7 +2476,7 @@ export default function Ventas() {
         </div>
 
         {/* BOTONES DE EXPORTACIÓN */}
-        <div className="col-12 col-md-1 d-flex gap-2 justify-content-md-end mt-3 mt-md-0">
+        <div className={`col-12 col-md-1 d-flex gap-2 justify-content-md-end mt-3 mt-md-0 ${!isMobile && 'ms-4'}`}>
           <button onClick={exportToExcel} className="btn btn-outline-success d-flex align-items-center flex-fill justify-content-center" title="Exportar Excel">
             <Icons.FileSpreadsheet size={16} /> <span className="d-md-none ms-2">Excel</span>
           </button>
@@ -2388,7 +2751,7 @@ export default function Ventas() {
                                 {/* 2. Ventas / Meta (Barra dual) */}
                                 <td className="py-2">
                                   <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
-                                    <span className="fw-bold">${(row.ventas / 1000000).toFixed(0)} M</span>
+                                    <span className="fw-bold">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(0) : (row.ventas / 1000000).toFixed(3)} M</span>
                                     <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
                                       Meta ${(row.presupuesto / 1000000).toFixed(0)} M
                                     </span>
@@ -2563,7 +2926,7 @@ export default function Ventas() {
                               {/* 2. Ventas / Meta (Barra dual) */}
                               <td className="py-2">
                                 <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
-                                  <span className="fw-bold">${(row.ventas / 1000000).toFixed(0)} M</span>
+                                  <span className="fw-bold">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(0) : (row.ventas / 1000000).toFixed(3)} M</span>
                                   <span style={{ color: '#888', fontSize: '0.75rem' }}>
                                     Meta ${(row.presupuesto / 1000000).toFixed(0)} M
                                   </span>

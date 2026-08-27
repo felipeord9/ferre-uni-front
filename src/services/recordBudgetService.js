@@ -24,7 +24,7 @@ const token = JSON.parse(localStorage.getItem("token"))
   return data
 }
 
-export const createRecord = async (body) => {
+export const createRecordBudget = async (body) => {
   const token = JSON.parse(localStorage.getItem("token"))
   const { data } = await axios.post(url, body, {
     headers: {
@@ -34,7 +34,7 @@ export const createRecord = async (body) => {
   return data
 }
 
-export const updateRecord = async (id, body) => {
+export const updateRecordBudget = async (id, body) => {
   const token = JSON.parse(localStorage.getItem("token"))
   const { data } = await axios.patch(`${url}/${id}`, body, {
     headers: {
@@ -43,13 +43,3 @@ export const updateRecord = async (id, body) => {
   })
   return data
 }
-
-export const deleteRecord = async (id) => {
-  const token = JSON.parse(localStorage.getItem("token"))
-  const { data } = await axios.delete(`${url}/${id}`, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  })
-  return data
-};
