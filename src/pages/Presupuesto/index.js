@@ -11,6 +11,7 @@ import Chulo from '../../assets/chulo-verde.png'
 import { FaUnlock } from "react-icons/fa";
 import { downloadBudgetTemplate } from '../../utils/DownloadBudget'
 import { exportBudgetTo3Sheets } from '../../utils/ExportBudget';
+import Plantilla from "../../utils/DownloadBudget/Plantilla_Presupuesto.xlsx";
 import { FaLock } from "react-icons/fa";
 import { ImInsertTemplate } from "react-icons/im";
 import { LuGoal } from "react-icons/lu";
@@ -356,6 +357,15 @@ export default function Presupuesto() {
   const handleCreateBudget = (e) => {
     e.preventDefault();
     if(presupuestoListo.length > 0){
+      Swal.fire({
+        title: 'Subiendo información',
+        text: `Por favor, espera mientras se guarda la información en nuestra base de datos...`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => {
+          Swal.showLoading(); 
+        }
+      });
       createMultipleBudget(presupuestoListo)
       .then(()=>{
         const inf = {
@@ -408,6 +418,15 @@ export default function Presupuesto() {
   const handleReplaceBudget = (e) => {
     e.preventDefault();
     if(presupuestoListo.length > 0){
+      Swal.fire({
+        title: 'Subiendo información',
+        text: `Por favor, espera mientras se guarda la información en nuestra base de datos...`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => {
+          Swal.showLoading(); 
+        }
+      });
       replaceBudget(presupuestoListo)
       .then(()=>{
         const inf = {
@@ -504,6 +523,15 @@ export default function Presupuesto() {
   const handleUpdateBudget = (e) => {
     e.preventDefault();
     if(updateBudget.length > 0){
+      Swal.fire({
+        title: 'Subiendo información',
+        text: `Por favor, espera mientras se guarda la información en nuestra base de datos...`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => {
+          Swal.showLoading(); 
+        }
+      });
       updateMultiple(updateBudget)
       .then(()=>{
         Swal.fire({
@@ -571,7 +599,7 @@ export default function Presupuesto() {
   };
 
   //funcion para limpiar la fecha del excel
-    const parseExcelDate = (excelValue) => {
+  const parseExcelDate = (excelValue) => {
     if (!excelValue) return '';
 
     // Si ya viene como un string (ej. desde el archivo .txt), lo devolvemos tal cual
@@ -1039,6 +1067,16 @@ export default function Presupuesto() {
     }
   };
 
+  const downloadBudgetExcel = (e) => {
+    e.preventDefault();
+    const link = document.createElement("a");
+    link.href = "../../utils/DownloadBudget/Plantilla_Presupuesto.xlsx";
+    link.download = "Plantilla_Presupuesto.xlsx"; // Nombre personalizado
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   return (
     <div className="container-fluid p-2 stack gap-2" style={{width: isMobile ? '' : '78vw'}}>
 
@@ -1101,8 +1139,10 @@ export default function Presupuesto() {
               <LuGoal className="me-2" />
                 Descargar presupuestos (.xlsx)
             </button>
-            <button 
-              onClick={downloadBudgetTemplate}
+            <a 
+              /* onClick={downloadBudgetExcel} */
+              href={Plantilla}
+              download="Plantilla_Presupuesto.xlsx"
               className="btn d-flex align-items-center fw-bold btn-sm btn-outline-success"
               onMouseEnter={() => setIsHoveredUpload(true)}
               onMouseLeave={() => setIsHoveredUpload(false)}
@@ -1118,7 +1158,7 @@ export default function Presupuesto() {
             >
               <ImInsertTemplate className="me-2" />
                 Descargar plantilla (.xlsx)
-            </button>
+            </a>
           </div>
 
           {/* Botón principal de Subir */}

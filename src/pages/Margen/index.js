@@ -184,6 +184,15 @@ export default function Margen() {
   const handleCreateMargin = (e) => {
     e.preventDefault();
     if(margenLista.length > 0){
+      Swal.fire({
+        title: 'Subiendo información',
+        text: `Por favor, espera mientras se guarda la información en nuestra base de datos...`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => {
+          Swal.showLoading(); 
+        }
+      });
       createMultipleMargin(margenLista)
       .then(()=>{
         Swal.fire({
@@ -224,6 +233,15 @@ export default function Margen() {
   const handleReplaceMargin = (e) => {
     e.preventDefault();
     if(margenLista.length > 0){
+      Swal.fire({
+        title: 'Subiendo información',
+        text: `Por favor, espera mientras se guarda la información en nuestra base de datos...`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => {
+          Swal.showLoading(); 
+        }
+      });
       replaceMargin(margenLista)
       .then(()=>{
         Swal.fire({
@@ -289,7 +307,7 @@ export default function Margen() {
   };
 
   //funcion para limpiar la fecha del excel
-    const parseExcelDate = (excelValue) => {
+  const parseExcelDate = (excelValue) => {
     if (!excelValue) return '';
 
     // Si ya viene como un string (ej. desde el archivo .txt), lo devolvemos tal cual
@@ -501,7 +519,6 @@ export default function Margen() {
       reader.readAsBinaryString(file);
     }
   };
-
 
   return (
     <div className="container-fluid p-2 stack gap-2" style={{width: isMobile ? '' : '78vw'}}>

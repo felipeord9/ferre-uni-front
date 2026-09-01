@@ -562,7 +562,7 @@ export default function Users() {
         <div className="panel-head"><h2>Crear usuario</h2></div>
         <div className="panel-body">
           <form onSubmit={editing ? handleUpdateUser : handleCreateNewUser} className="row g-3">
-            <div className="col-12 col-md-4">
+            {/* <div className="col-12 col-md-4">
               <label className="form-label w-100">Número identificación
                 <input 
                   required 
@@ -573,9 +573,9 @@ export default function Users() {
                   onChange={e => setUserForm({...userForm, rowId: e.target.value})}
                 />
               </label>
-            </div>
+            </div> */}
 
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-md-6">
               <label className="form-label w-100">Nombre
                 <input 
                   required 
@@ -585,7 +585,7 @@ export default function Users() {
               </label>
             </div>
 
-            <div className="col-12 col-md-4">
+            <div className="col-12 col-md-6">
               <label className="form-label w-100">Rol
                 <select 
                   value={userForm.role}
