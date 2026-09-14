@@ -1051,6 +1051,12 @@ export default function Ventas() {
     if (filters.clientType?.length > 0) {
       filtered = filtered.filter(row => filters.clientType.includes(row.typeClient));
     }
+    if (filters.supplier?.length > 0) {
+      filtered = filtered.filter(row => filters.supplier.includes(row.proveedor));
+    }
+    if (filters.listPrice?.length > 0) {
+      filtered = filtered.filter(row => filters.listPrice.includes(row.descLp));
+    }
 
     // Actualización de estado y KPIs
     setSalesData(filtered);
