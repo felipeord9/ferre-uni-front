@@ -17,8 +17,8 @@ const BulletBar = ({ current = 0, target = 0, pct = 0, isCurrency = true }) => {
 
   // 2. Formateador de moneda ($ M / $ k)
   const formatMoney = (val) => {
-    if (Math.abs(val) >= 1000000) {
-      return `$${(val / 1000000).toLocaleString('es-CO', { maximumFractionDigits: 0 })} M`;
+    if (Math.abs(val) >= 1000) {
+      return `$${(val / 1000).toLocaleString('es-CO', { maximumFractionDigits: 0 })} k`;
     }
     return `$${(val / 1000).toLocaleString('es-CO', { maximumFractionDigits: 0 })} k`;
   };

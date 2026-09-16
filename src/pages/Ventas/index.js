@@ -2757,7 +2757,7 @@ export default function Ventas() {
                                 {/* 2. Ventas / Meta (Barra dual) */}
                                 <td className="py-2">
                                   <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
-                                    <span className="fw-bold">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(0) : (row.ventas / 1000000).toFixed(3)} M</span>
+                                    <span className="fw-bold ms-0">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(3) : (row.ventas / 1000000).toFixed(3)} k</span>
                                     <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
                                       Meta ${(row.presupuesto / 1000000).toFixed(0)} M
                                     </span>
@@ -2932,7 +2932,7 @@ export default function Ventas() {
                               {/* 2. Ventas / Meta (Barra dual) */}
                               <td className="py-2">
                                 <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
-                                  <span className="fw-bold">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(0) : (row.ventas / 1000000).toFixed(3)} M</span>
+                                  <span className="fw-bold ms-0">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(3) : (row.ventas / 1000000).toFixed(3)} k</span>
                                   <span style={{ color: '#888', fontSize: '0.75rem' }}>
                                     Meta ${(row.presupuesto / 1000000).toFixed(0)} M
                                   </span>
@@ -3235,22 +3235,25 @@ export default function Ventas() {
                     Sin datos - Cargue un archivo
                   </div>
                 ) : (() => {
-                  // 1. Agrupamos los datos de ventas por "descLp"
+                  // 1. Agrupamos asociando el ID al nombre
                   const lpGrouped = salesData.reduce((acc, curr) => {
+                    const lpid = curr.idListPrice || curr.id_list_price || 'S/I';
                     const lpName = curr.descLp || curr.desc_lp || 'Sola / Sin Lista';
                     const valor = Number(curr.monto || curr.valor || curr.total || 0);
 
                     if (!acc[lpName]) {
-                      acc[lpName] = 0;
+                      acc[lpName] = { lpid: lpid, value: 0 };
                     }
-                    acc[lpName] += valor;
+                    acc[lpName].value += valor;
                     return acc;
                   }, {});
 
-                  // 2. Convertimos el objeto agrupado a un array
+                  // 2. Convertimos a array concatenando lpid + name en displayName
                   const rawLpData = Object.keys(lpGrouped).map((key) => ({
                     name: key,
-                    value: lpGrouped[key]
+                    lpid: lpGrouped[key].lpid,
+                    displayName: `${lpGrouped[key].lpid} - ${key}`, // 👈 "lpid - name"
+                    value: lpGrouped[key].value
                   }));
 
                   // 3. Calculamos el total acumulado
@@ -3269,18 +3272,10 @@ export default function Ventas() {
                     };
                   });
 
-                  // 🎯 NUEVA PALETA DE 10 COLORES (Estilo Neón/Moderno Dashboard)
+                  // 🎯 PALETA DE COLORES
                   const COLORES_GRAFICO = [
-                    '#0284c7', // Azul Ciel / Sky Blue
-                    '#e11d48', // Coral Red / Carmín
-                    '#059669', // Verde Esmeralda Oscuro
-                    '#d97706', // Ámbar Cálido
-                    '#7c3aed', // Violeta Eléctrico
-                    '#0d9488', // Teal / Azul Verdoso
-                    '#db2777', // Fucsia
-                    '#65a30d', // Verde Lima
-                    '#4f46e5', // Indigo Neón
-                    '#475569'  // Pizarra Oscuro
+                    '#0284c7', '#e11d48', '#059669', '#d97706', '#7c3aed',
+                    '#0d9488', '#db2777', '#65a30d', '#4f46e5', '#475569'
                   ];
 
                   return (
@@ -3289,7 +3284,7 @@ export default function Ventas() {
                         <Pie
                           data={lpWithPercentage}
                           dataKey="value"
-                          nameKey="name"
+                          nameKey="displayName" // 👈 Usamos displayName para que tome "lpid - name"
                           cx="50%"
                           cy="50%"
                           outerRadius={100}
@@ -3307,7 +3302,6 @@ export default function Ventas() {
                           ))}
                         </Pie>
 
-                        {/* Tooltip personalizado */}
                         <Tooltip
                           content={({ active, payload }) => {
                             if (active && payload && payload.length) {
@@ -3322,7 +3316,7 @@ export default function Ventas() {
                                   }}
                                 >
                                   <p className="fw-bold mb-1" style={{ color: 'var(--ink, #0f172a)' }}>
-                                    {data.name}
+                                    {data.displayName}
                                   </p>
                                   <p className="mb-0" style={{ color: '#0284c7' }}>
                                     Total Ventas: <strong>${Number(data.value).toLocaleString('es-CO')}</strong>
@@ -3337,13 +3331,35 @@ export default function Ventas() {
                           }}
                         />
 
-                        {/* Leyenda en la parte inferior */}
+                        {/* Leyenda en la parte inferior personalizada */}
                         <Legend
-                          verticalAlign="bottom"
-                          height={isMobile ? 65 : 36}
-                          iconType="circle"
-                          wrapperStyle={{ fontSize: '11px', color: 'var(--muted, #6c757d)' }}
+                verticalAlign="bottom"
+                content={({ payload }) => (
+                  <div className="d-flex flex-wrap justify-content-center gap-x-3 gap-y-1 pt-2" style={{ fontSize: '12px' }}>
+                    {payload.map((entry, index) => (
+                      <div 
+                        key={`item-${index}`} 
+                        className="d-flex align-items-center me-3 mb-1"
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        <span
+                          style={{
+                            width: '10px',
+                            height: '10px',
+                            backgroundColor: entry.color,
+                            borderRadius: '50%',
+                            display: 'inline-block',
+                            marginRight: '2px' // 👈 Distancia exacta y corta entre el punto y el texto
+                          }}
                         />
+                        <span style={{ color: entry.color, fontWeight: '600' }}>
+                          {entry.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              />
                       </PieChart>
                     </ResponsiveContainer>
                   );
@@ -3386,56 +3402,69 @@ export default function Ventas() {
                     0
                   );
 
-                  // 4. Inyectamos el % de participación
+                  // 4. Inyectamos % y formato en Millones ($M)
                   const lpWithPercentage = rawLpData.map((item) => {
                     const val = Number(item.value) || 0;
                     const pct = totalVentasLp > 0 ? ((val / totalVentasLp) * 100).toFixed(1) : '0.0';
+                    
+                    // Formatear a millones (ej. 736.000.000 -> $736M)
+                    const enMillones = (val / 1000000).toLocaleString('es-CO', {
+                      maximumFractionDigits: 1
+                    });
+                    const labelMillones = val > 0 ? `$${enMillones}M` : '$0M';
+
                     return {
                       ...item,
                       porcentaje: pct,
+                      labelMillones,
                     };
                   });
 
-                  // 🎯 PALETA DE 10 COLORES DE ALTO CONTRASTE
+                  // 🎯 PALETA DE COLORES
                   const COLORES_GRAFICO = [
-                    '#2563eb', // Azul Royal
-                    '#10b981', // Verde Esmeralda
-                    '#f59e0b', // Ámbar / Naranja cálido
-                    '#8b5cf6', // Púrpura
-                    '#ec4899', // Rosa Intenso
-                    '#06b6d4', // Cían / Turquesa
-                    '#f97316', // Naranja Vivo
-                    '#14b8a6', // Menta / Teal
-                    '#6366f1', // Indigo
-                    '#64748b'  // Gris Pizarra
+                    '#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899',
+                    '#06b6d4', '#f97316', '#14b8a6', '#6366f1', '#64748b'
                   ];
+
+                  // Formateador para el eje Y
+                  const formatYAxis = (tickItem) => {
+                    return `$${Number(tickItem).toLocaleString('es-CO', { notation: "compact", compactDisplay: "short" })}`;
+                  };
 
                   return (
                     <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={lpWithPercentage}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={100}
-                          innerRadius={45}
-                          paddingAngle={1}
-                          isAnimationActive={false}
-                          label={({ porcentaje }) => `${porcentaje}%`}
-                          labelLine={true}
-                        >
-                          {lpWithPercentage.map((entry, index) => (
-                            <Cell
-                              key={`cell-pie-${index}`}
-                              fill={COLORES_GRAFICO[index % COLORES_GRAFICO.length]}
-                            />
-                          ))}
-                        </Pie>
+                      <BarChart
+                        data={lpWithPercentage}
+                        margin={{
+                          top: 25, // Margen superior para evitar que la etiqueta se corte arriba
+                          right: 10,
+                          left: isMobile ? 0 : 20,
+                          bottom: 60,
+                        }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--line, #e0e0e0)" vertical={false} />
+                        
+                        <XAxis 
+                          dataKey="name" 
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fontSize: 11, fill: 'var(--muted, #6c757d)' }}
+                          interval={0} 
+                          angle={-45}
+                          textAnchor="end"
+                          height={60}
+                        />
+                        
+                        <YAxis 
+                          axisLine={false}
+                          tickLine={false}
+                          tickFormatter={formatYAxis}
+                          tick={{ fontSize: 11, fill: 'var(--muted, #6c757d)' }}
+                          width={isMobile ? 40 : 60}
+                        />
 
-                        {/* Tooltip personalizado */}
                         <Tooltip
+                          cursor={{ fill: 'rgba(0, 0, 0, 0.05)' }}
                           content={({ active, payload }) => {
                             if (active && payload && payload.length) {
                               const data = payload[0].payload;
@@ -3464,14 +3493,26 @@ export default function Ventas() {
                           }}
                         />
 
-                        {/* Leyenda en la parte inferior */}
-                        <Legend
-                          verticalAlign="bottom"
-                          height={isMobile ? 92 : 52}
-                          iconType="circle"
-                          wrapperStyle={{ fontSize: '11px', color: 'var(--muted, #6c757d)' }}
-                        />
-                      </PieChart>
+                        <Bar 
+                          dataKey="value" 
+                          radius={[4, 4, 0, 0]} 
+                          isAnimationActive={false}
+                        >
+                          {/* 🏷️ Muestra la etiqueta $M en la parte superior de cada barra */}
+                          <LabelList 
+                            dataKey="labelMillones" 
+                            position="top" 
+                            style={{ fontSize: '10px', fontWeight: 'bold', fill: '#6c757d' }} 
+                          />
+
+                          {lpWithPercentage.map((entry, index) => (
+                            <Cell 
+                              key={`cell-bar-${index}`} 
+                              fill={COLORES_GRAFICO[index % COLORES_GRAFICO.length]} 
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
                     </ResponsiveContainer>
                   );
                 })()}
