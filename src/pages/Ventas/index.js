@@ -397,143 +397,148 @@ export default function Ventas() {
     textMuted: '#64748b' // Gris para el texto secundario
   };
 
-  //funcion para determinar el presupuesto global
-  useEffect(()=>{
+// 1. Extraemos excluidos fuera del renderizado para evitar recrearlos en memoria
+  const EXCLUDED_SELLERS = [
+    'CEBALLOS ARISTIZABAL IVAN ORLANDO',
+    'CEBALLOS DE BRAVO BERTHA LUCIA'
+  ];
+
+  useEffect(() => {
     Swal.fire({
       title: 'Cargando',
-      text: `Por favor, espera mientras carga la información...`,
+      text: 'Por favor, espera mientras carga la información...',
       allowOutsideClick: false,
       showConfirmButton: false,
-      didOpen: () => {
-        Swal.showLoading(); 
-      }
+      didOpen: () => Swal.showLoading()
     });
-    findBudgets()
-    .then(({data})=>{
-      setTotalBudget(data)
-      const datosFiltrados = data.filter(item => Number(item.anio) === new Date().getFullYear());
-      const suma = datosFiltrados.reduce((acumulador, item) => {
-        const montoNumerico = Number(item.monto) || 0;
-        return acumulador + montoNumerico;
-      }, 0);
-      setYearBudget(suma)
-    })
-    findMargins()
-    .then(({data})=>{
-      /* setMarginsData(data) */
-      setTotalMargin(data)
-      const datosFiltrados = data.filter(item => Number(item.anio) === new Date().getFullYear());
-      const suma = datosFiltrados.reduce((acumulador, item) => {
-        const montoNumerico = Number(item.expectedMargin) || 0;
-        return acumulador + montoNumerico;
-      }, 0);
-      const result = suma / datosFiltrados.length;
-      setYearMargin(result.toFixed(2))
-    })
-    findSales()
-    .then(({data})=>{
-      procesoInicial(data)
-    })
-  },[]);
+
+    const currentYear = new Date().getFullYear();
+
+    // OPTIMIZACIÓN 1: Peticiones en paralelo con Promise.all
+    Promise.all([findBudgets(), findMargins(), findSales()])
+      .then(([{ data: budgets }, { data: margins }, { data: sales }]) => {
+        
+        // --- Procesar Presupuestos ---
+        setTotalBudget(budgets);
+        const budgetYearTotal = budgets.reduce((acc, item) => {
+          return Number(item.anio) === currentYear ? acc + (Number(item.monto) || 0) : acc;
+        }, 0);
+        setYearBudget(budgetYearTotal);
+
+        // --- Procesar Márgenes ---
+        setTotalMargin(margins);
+        const filteredMargins = margins.filter(item => Number(item.anio) === currentYear);
+        const marginSum = filteredMargins.reduce((acc, item) => acc + (Number(item.expectedMargin) || 0), 0);
+        // Evitar división por cero
+        const marginAvg = filteredMargins.length > 0 ? (marginSum / filteredMargins.length).toFixed(2) : '0.00';
+        setYearMargin(marginAvg);
+
+        // --- Procesar Ventas ---
+        procesoInicial(sales);
+      })
+      .catch((error) => {
+        console.error('Error al cargar la información:', error);
+      })
+      .finally(() => {
+        // OPTIMIZACIÓN 2: Swal.close() garantizado solo cuando TODO haya terminado
+        Swal.close();
+      });
+  }, []);
 
   const procesoInicial = (data) => {
-    const dataNormalized = data.map(item => ({
-      ...item,
-      parsedDate: normalizeDate(item.date) // Agrega el objeto Date limpio
-    }));
+    const currentYearStr = String(new Date().getFullYear());
+    const currentMonthNumStr = String(new Date().getMonth() + 1).padStart(2, '0');
 
-    // Guardar datos procesados
+    // Estructuras para acumular valores únicos en UN SOLO RECORRIDO
+    const sets = {
+      sellers: new Set(),
+      lines: new Set(),
+      cities: new Set(),
+      clientTypes: new Set(),
+      suppliers: new Set(),
+      listPrice: new Set(),
+      years: new Set()
+    };
+
+    const initialFilteredRows = [];
+    const dataNormalized = new Array(data.length);
+
+    // OPTIMIZACIÓN 3: Recorrido ÚNICO (O(N)) sobre el Array de Ventas
+    for (let i = 0; i < data.length; i++) {
+      const item = data[i];
+
+      // 1. Normalización de fecha y guardado
+      const parsedDate = normalizeDate(item.date);
+      const normalizedItem = { ...item, parsedDate };
+      dataNormalized[i] = normalizedItem;
+
+      // 2. Filtrado de vendedores excluidos
+      const isExcluded = EXCLUDED_SELLERS.includes(item.vendedor);
+      if (!isExcluded) {
+        initialFilteredRows.push(normalizedItem);
+      }
+
+      // 3. Extracción de valores únicos para los Selects
+      if (item.vendedor) sets.sellers.add(item.vendedor);
+      if (item.linea) sets.lines.add(item.linea);
+      if (item.co) sets.cities.add(item.co);
+      if (item.typeClient) sets.clientTypes.add(item.typeClient);
+      if (item.proveedor) sets.suppliers.add(item.proveedor);
+      if (item.descLp) sets.listPrice.add(item.descLp);
+
+      // Parseo optimizado de años
+      if (item.date) {
+        const dateObj = new Date(item.date);
+        if (!isNaN(dateObj.getTime())) {
+          sets.years.add(String(dateObj.getFullYear()));
+        } else if (typeof item.date === 'string' && item.date.includes('/')) {
+          const parts = item.date.split('/');
+          if (parts.length === 3) sets.years.add(parts[2]);
+        }
+      }
+    }
+
+    // Guardar estados masivos
     setRawSalesData(dataNormalized);
-
-    const excludedSellers = [
-      'CEBALLOS ARISTIZABAL IVAN ORLANDO',
-      'CEBALLOS DE BRAVO BERTHA LUCIA'
-    ];
-
-    const initialFilteredRows = dataNormalized.filter(
-      item => !excludedSellers.includes(item.vendedor)
-    );
-
     setSalesData(initialFilteredRows);
     setSalesRowsCount(initialFilteredRows.length);
     setCurrentPage(1);
 
-    // Obtener todos los vendedores para las opciones desplegables
-    const allUniqueSellers = [...new Set(data.map(item => item.vendedor).filter(Boolean))];
-      
-    // Lista inicial preseleccionada sin los excluidos
-    const defaultSelectedSellers = allUniqueSellers.filter(
-      seller => !excludedSellers.includes(seller)
-    );
+    // Convertir Sets a Arrays
+    const allUniqueSellers = Array.from(sets.sellers);
+    const defaultSelectedSellers = allUniqueSellers.filter(s => !EXCLUDED_SELLERS.includes(s));
+    const uniqueYears = Array.from(sets.years).sort((a, b) => b - a);
+    const uniqueMonth = mesesConNumero.map(m => m.nombre);
 
-    const uniqueLines = [...new Set(data.map(item => item.linea).filter(Boolean))];
-    const uniqueCities = [...new Set(data.map(item => item.co).filter(Boolean))];
-    const uniqueClientTypes = [...new Set(data.map(item => item.typeClient).filter(Boolean))];
-    const uniqueSupplier = [...new Set(data.map(item => item.proveedor).filter(Boolean))];
-    const uniqueListPrice = [...new Set(data.map(item => item.descLp).filter(Boolean))];
-      
-    // 🎯 EXTRAER AÑOS ÚNICOS COMPATIBLE CON FORMATO POSTGRESQL / ISO
-    const uniqueYears = [...new Set(data.map(item => {
-      if (!item.date) return null;
-      
-      // 1. Intentar parsear si viene en formato Date o ISO de Postgres (YYYY-MM-DD...)
-      const parsedDate = new Date(item.date);
-      if (!isNaN(parsedDate.getTime())) {
-        return String(parsedDate.getFullYear());
-      }
-
-      // 2. Fallback por si viniera en formato de texto DD/MM/YYYY
-      if (typeof item.date === 'string' && item.date.includes('/')) {
-        const parts = item.date.split('/');
-        return parts.length === 3 ? parts[2] : null;
-      }
-
-      return null;
-    }).filter(Boolean))].sort((a, b) => b - a);
-      
-    const uniqueMonth = mesesConNumero.map(m => m.nombre)
-
-    // Opciones del selector (incluye a todos los vendedores)
     setFilterOptions({
       sellers: allUniqueSellers,
-      lines: uniqueLines,
-      cities: uniqueCities,
-      clientTypes: uniqueClientTypes,
+      lines: Array.from(sets.lines),
+      cities: Array.from(sets.cities),
+      clientTypes: Array.from(sets.clientTypes),
       years: uniqueYears,
       months: uniqueMonth,
-      suppliers: uniqueSupplier,
-      listPrice: uniqueListPrice,
+      suppliers: Array.from(sets.suppliers),
+      listPrice: Array.from(sets.listPrice)
     });
 
-    // 🎯 3. DETECTAR AÑO Y MES ACTUAL
-    const today = new Date();
-    const currentYearStr = String(today.getFullYear());
-    const currentMonthNumStr = String(today.getMonth() + 1).padStart(2, '0');
-      
+    // Detección de Fecha por Defecto
     const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === currentMonthNumStr);
-    const currentMonthName = currentMonthObj ? currentMonthObj.nombre : null;
+    const currentMonthName = currentMonthObj?.nombre;
 
-    // Determinar año y mes por defecto
     const defaultYear = uniqueYears.includes(currentYearStr) ? currentYearStr : (uniqueYears[0] || '');
     const defaultMonthName = (currentMonthName && uniqueMonth.includes(currentMonthName))
       ? currentMonthName
       : (uniqueMonth[0] || '');
 
-    // 🎯 4. ACTUALIZAR ESTADO DE FILTROS ACTIVO
     setFilters(prev => ({
       ...prev,
       seller: defaultSelectedSellers,
       year: defaultYear || prev.year,
-      month: defaultMonthName ? [defaultMonthName] : prev.month // Pasa como Array para tu Select multiselect
+      month: defaultMonthName ? [defaultMonthName] : prev.month
     }));
 
-    // Calculamos KPIs iniciales sobre la data limpia inicial
-    const initialKpis = calculateKPIs(initialFilteredRows);
-    setKpiData(initialKpis);
-
-    setTimeout(() => {
-      Swal.close(); 
-    }, 800); 
+    // KPIs
+    setKpiData(calculateKPIs(initialFilteredRows));
   };
 
   const mesesConNumero = [
