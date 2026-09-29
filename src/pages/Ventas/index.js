@@ -26,7 +26,7 @@ import SellerRankingChart from '../../components/SellerRankingChart';
 import MonthlyMargin from '../../components/MonthlyMargin';
 import { FiUpload } from 'react-icons/fi';
 import Chulo from '../../assets/chulo-verde.png'
-import Select from 'react-select';
+import Select, { components } from 'react-select';
 import * as XLSX from 'xlsx';
 import Swal from 'sweetalert2';
 
@@ -2076,6 +2076,36 @@ export default function Ventas() {
     }
   }
 
+  const CheckboxOption = (props) => {
+    return (
+      <components.Option {...props} className='d-flex flex-row'>
+        <input
+          type="checkbox"
+          checked={props.isSelected}
+          onChange={() => null} // Previene advertencias de React
+          className="form-check-input me-2 mt-0"
+          style={{ 
+            cursor: 'pointer', 
+            transform: 'scale(0.75)', // 👈 Reduce el tamaño al 75% proporcionalmente
+            transformOrigin: 'center',
+            margin: 0
+          }}
+        />
+        <label 
+          className='mt-2 pt-1'
+          style={{ 
+            cursor: 'pointer', 
+            margin: 0, 
+            fontSize: 11, 
+            color: props.isSelected ? 'white' : 'muted' 
+          }}
+        >
+          {props.label}
+        </label>
+      </components.Option>
+    );
+  };
+
   return (
     <div className="container-fluid p-2 stack gap-4 w-100">
       
@@ -2157,8 +2187,6 @@ export default function Ventas() {
         </div>
       }
 
-{/* {JSON.stringify(rawSalesData.map((item)=>`${item.fecha} - ${item.parsedDate}`))} */}
-
       {/* TOOLBAR DE FILTROS */}
       <div className="toolbar p-2 rounded shadow-sm row align-items-end mb-4 gap-0">
         {/* Filtro por vendedor */}
@@ -2166,12 +2194,22 @@ export default function Ventas() {
           <label className="form-label fw-semibold small mb-1">Vendedor</label>
           <Select
             isMulti
-            // 1. Agregamos la opción de seleccionar todos al inicio
+            closeMenuOnSelect={false}
+            hideSelectedOptions={false}
+            blurInputOnSelect={false}
+            components={{ Option: CheckboxOption }}
             options={[
               { value: '*', label: '--- Seleccionar Todos ---' },
               ...filterOptions.sellers.map(s => ({ value: s, label: s }))
             ]}
-            value={filters.seller.map(s => ({ value: s, label: s }))}
+            value={
+              filterOptions.sellers.length > 0 && filters.seller.length === filterOptions.sellers.length
+                ? [
+                    { value: '*', label: '--- Seleccionar Todos ---' },
+                    ...filterOptions.sellers.map(s => ({ value: s, label: s }))
+                  ]
+                : filters.seller.map(s => ({ value: s, label: s }))
+            }
             onChange={(selectedOptions) => {
               // Manejo cuando se limpia el campo completamente
               if (!selectedOptions || selectedOptions.length === 0) {
@@ -2179,7 +2217,7 @@ export default function Ventas() {
                 return;
               }
 
-              // 2. Evaluamos si el usuario seleccionó "Seleccionar Todos"
+              // Evaluamos si el usuario seleccionó "Seleccionar Todos"
               const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
 
               if (hasSelectAll) {
@@ -2210,24 +2248,31 @@ export default function Ventas() {
           <label className="form-label fw-semibold small mb-1">Línea</label>
           <Select
             isMulti
-            // 1. Inyectamos la opción de seleccionar todos al inicio
+            closeMenuOnSelect={false}
+            hideSelectedOptions={false}
+            blurInputOnSelect={false}
+            components={{ Option: CheckboxOption }}
             options={[
               { value: '*', label: '--- Seleccionar Todos ---' },
               ...filterOptions.lines.map(l => ({ value: l, label: l }))
             ]}
-            value={filters.line.map(l => ({ value: l, label: l }))}
+            value={
+              filterOptions.lines.length > 0 && filters.line.length === filterOptions.lines.length
+                ? [
+                    { value: '*', label: '--- Seleccionar Todos ---' },
+                    ...filterOptions.lines.map(l => ({ value: l, label: l }))
+                  ]
+                : filters.line.map(l => ({ value: l, label: l }))
+            }
             onChange={(selectedOptions) => {
-              // Manejo si se limpia la selección
               if (!selectedOptions || selectedOptions.length === 0) {
                 setFilters({ ...filters, line: [] });
                 return;
               }
 
-              // 2. Evaluamos si se seleccionó "Seleccionar Todos"
               const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
 
               if (hasSelectAll) {
-                // Alternar: si ya estaban todas las líneas marcadas, vaciamos; si no, seleccionamos todas
                 if (filters.line.length === filterOptions.lines.length) {
                   setFilters({ ...filters, line: [] });
                 } else {
@@ -2237,7 +2282,6 @@ export default function Ventas() {
                   });
                 }
               } else {
-                // Selección individual
                 setFilters({
                   ...filters,
                   line: selectedOptions.map(opt => opt.value)
@@ -2254,24 +2298,31 @@ export default function Ventas() {
           <label className="form-label fw-semibold small mb-1">C.O.</label>
           <Select
             isMulti
-            // 1. Agregamos la opción de seleccionar todos al inicio
+            closeMenuOnSelect={false}
+            hideSelectedOptions={false}
+            blurInputOnSelect={false}
+            components={{ Option: CheckboxOption }}
             options={[
               { value: '*', label: '--- Seleccionar Todos ---' },
               ...filterOptions.cities.map(c => ({ value: c, label: c }))
             ]}
-            value={filters.city.map(c => ({ value: c, label: c }))}
+            value={
+              filterOptions.cities.length > 0 && filters.city.length === filterOptions.cities.length
+                ? [
+                    { value: '*', label: '--- Seleccionar Todos ---' },
+                    ...filterOptions.cities.map(c => ({ value: c, label: c }))
+                  ]
+                : filters.city.map(c => ({ value: c, label: c }))
+            }
             onChange={(selectedOptions) => {
-              // Si se limpia el select completamente
               if (!selectedOptions || selectedOptions.length === 0) {
                 setFilters({ ...filters, city: [] });
                 return;
               }
 
-              // 2. Evaluamos si el usuario seleccionó "Seleccionar Todos"
               const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
 
               if (hasSelectAll) {
-                // Alternar: si ya estaban todos marcados, vaciamos; si no, marcamos todas las ciudades
                 if (filters.city.length === filterOptions.cities.length) {
                   setFilters({ ...filters, city: [] });
                 } else {
@@ -2281,7 +2332,6 @@ export default function Ventas() {
                   });
                 }
               } else {
-                // Selección manual de items
                 setFilters({
                   ...filters,
                   city: selectedOptions.map(opt => opt.value)
@@ -2292,41 +2342,46 @@ export default function Ventas() {
             styles={customSelectStyles}
           />
         </div>
-        
+
         {/* filtro por tipo de cliente */}
         <div className="col-12 col-sm-6 col-md-3">
           <label className="form-label fw-semibold small mb-1">Tipo cliente</label>
           <Select
             isMulti
-            // 1. Inyectamos la opción de seleccionar todos
+            closeMenuOnSelect={false}
+            hideSelectedOptions={false}
+            blurInputOnSelect={false}
+            components={{ Option: CheckboxOption }}
             options={[
               { value: '*', label: '--- Seleccionar Todos ---' },
               ...filterOptions.clientTypes.map(t => ({ value: t, label: t }))
             ]}
-            value={filters.clientType.map(t => ({ value: t, label: t }))}
+            value={
+              filterOptions.clientTypes.length > 0 && filters.clientType.length === filterOptions.clientTypes.length
+                ? [
+                    { value: '*', label: '--- Seleccionar Todos ---' },
+                    ...filterOptions.clientTypes.map(t => ({ value: t, label: t }))
+                  ]
+                : filters.clientType.map(t => ({ value: t, label: t }))
+            }
             onChange={(selectedOptions) => {
-              // Manejo si se limpia la selección
               if (!selectedOptions || selectedOptions.length === 0) {
                 setFilters({ ...filters, clientType: [] });
                 return;
               }
 
-              // 2. Verificamos si se seleccionó la opción "Seleccionar Todos"
               const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
 
               if (hasSelectAll) {
-                // Si ya estaban todos seleccionados y vuelve a pulsar "Todos", limpia la selección
                 if (filters.clientType.length === filterOptions.clientTypes.length) {
                   setFilters({ ...filters, clientType: [] });
                 } else {
-                  // Si no, selecciona todos los tipos de cliente disponibles
                   setFilters({
                     ...filters,
                     clientType: filterOptions.clientTypes
                   });
                 }
               } else {
-                // Selección individual
                 setFilters({
                   ...filters,
                   clientType: selectedOptions.map(opt => opt.value)
@@ -2337,42 +2392,46 @@ export default function Ventas() {
             styles={customSelectStyles}
           />
         </div>
-        
+
         {/* filtro por proveedor */}
         <div className="col-12 col-sm-6 col-md-3 mt-1">
           <label className="form-label fw-semibold small mb-1">Proveedor</label>
           <Select
             isMulti
-            // 1. Agregamos la opción "Seleccionar Todos" al inicio del array de opciones
+            closeMenuOnSelect={false}
+            hideSelectedOptions={false}
+            blurInputOnSelect={false}
+            components={{ Option: CheckboxOption }}
             options={[
               { value: '*', label: '--- Seleccionar Todos ---' },
               ...filterOptions.suppliers.map(t => ({ value: t, label: t }))
             ]}
-            value={filters.supplier.map(t => ({ value: t, label: t }))}
-            onChange={(selectedOptions, actionMeta) => {
-              // Manejo cuando no hay nada seleccionado o se limpian los datos
+            value={
+              filterOptions.suppliers.length > 0 && filters.supplier.length === filterOptions.suppliers.length
+                ? [
+                    { value: '*', label: '--- Seleccionar Todos ---' },
+                    ...filterOptions.suppliers.map(t => ({ value: t, label: t }))
+                  ]
+                : filters.supplier.map(t => ({ value: t, label: t }))
+            }
+            onChange={(selectedOptions) => {
               if (!selectedOptions || selectedOptions.length === 0) {
                 setFilters({ ...filters, supplier: [] });
                 return;
               }
 
-              // 2. Comprobamos si el usuario hizo clic en "Seleccionar Todos"
               const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
 
               if (hasSelectAll) {
-                // Si ya están todos seleccionados y el usuario hace clic en desmarcar uno, o si seleccionó "Todos"
                 if (filters.supplier.length === filterOptions.suppliers.length) {
-                  // Si ya estaban todos y tocó algo, o volvió a pulsar seleccionar todos: vaciamos la selección
                   setFilters({ ...filters, supplier: [] });
                 } else {
-                  // Si no estaban todos seleccionados, marcamos todos los proveedores disponibles
                   setFilters({
                     ...filters,
                     supplier: filterOptions.suppliers
                   });
                 }
               } else {
-                // Selección normal de opciones individuales
                 setFilters({
                   ...filters,
                   supplier: selectedOptions.map(opt => opt.value)
@@ -2389,36 +2448,40 @@ export default function Ventas() {
           <label className="form-label fw-semibold small mb-1">Lista de precio</label>
           <Select
             isMulti
-            // 1. Agregamos la opción "Seleccionar Todos" al inicio del array de opciones
+            closeMenuOnSelect={false}
+            hideSelectedOptions={false}
+            blurInputOnSelect={false}
+            components={{ Option: CheckboxOption }}
             options={[
               { value: '*', label: '--- Seleccionar Todos ---' },
               ...filterOptions.listPrice.map(t => ({ value: t, label: t }))
             ]}
-            value={filters.listPrice.map(t => ({ value: t, label: t }))}
-            onChange={(selectedOptions, actionMeta) => {
-              // Manejo cuando no hay nada seleccionado o se limpian los datos
+            value={
+              filterOptions.listPrice.length > 0 && filters.listPrice.length === filterOptions.listPrice.length
+                ? [
+                    { value: '*', label: '--- Seleccionar Todos ---' },
+                    ...filterOptions.listPrice.map(t => ({ value: t, label: t }))
+                  ]
+                : filters.listPrice.map(t => ({ value: t, label: t }))
+            }
+            onChange={(selectedOptions) => {
               if (!selectedOptions || selectedOptions.length === 0) {
                 setFilters({ ...filters, listPrice: [] });
                 return;
               }
 
-              // 2. Comprobamos si el usuario hizo clic en "Seleccionar Todos"
               const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
 
               if (hasSelectAll) {
-                // Si ya están todos seleccionados y el usuario hace clic en desmarcar uno, o si seleccionó "Todos"
                 if (filters.listPrice.length === filterOptions.listPrice.length) {
-                  // Si ya estaban todos y tocó algo, o volvió a pulsar seleccionar todos: vaciamos la selección
                   setFilters({ ...filters, listPrice: [] });
                 } else {
-                  // Si no estaban todos seleccionados, marcamos todos los proveedores disponibles
                   setFilters({
                     ...filters,
                     listPrice: filterOptions.listPrice
                   });
                 }
               } else {
-                // Selección normal de opciones individuales
                 setFilters({
                   ...filters,
                   listPrice: selectedOptions.map(opt => opt.value)
@@ -2435,12 +2498,22 @@ export default function Ventas() {
           <label className="form-label fw-semibold small mb-1">Mes</label>
           <Select
             isMulti
-            // 1. Agregamos la opción de seleccionar todos al inicio
+            closeMenuOnSelect={false}
+            hideSelectedOptions={false}
+            blurInputOnSelect={false}
+            components={{ Option: CheckboxOption }}
             options={[
               { value: '*', label: '--- Seleccionar Todos ---' },
               ...filterOptions.months.map(c => ({ value: c, label: c }))
             ]}
-            value={filters.month.map(c => ({ value: c, label: c }))}
+            value={
+              filterOptions.months.length > 0 && filters.month.length === filterOptions.months.length
+                ? [
+                    { value: '*', label: '--- Seleccionar Todos ---' },
+                    ...filterOptions.months.map(c => ({ value: c, label: c }))
+                  ]
+                : filters.month.map(c => ({ value: c, label: c }))
+            }
             onChange={(selectedOptions) => {
               // Manejo cuando se limpia la selección completamente
               if (!selectedOptions || selectedOptions.length === 0) {
@@ -2448,11 +2521,11 @@ export default function Ventas() {
                 return;
               }
 
-              // 2. Evaluamos si el usuario seleccionó "Seleccionar Todos"
+              // Evaluamos si el usuario seleccionó "Seleccionar Todos"
               const hasSelectAll = selectedOptions.some(opt => opt.value === '*');
 
               if (hasSelectAll) {
-                // Alternar: si ya estaban todos los meses seleccionados, vaciamos; si no, marcamos todos los meses disponibles
+                // Alternar: si ya estaban todos los meses seleccionados, vaciamos; si no, marcamos todos
                 if (filters.month.length === filterOptions.months.length) {
                   setFilters({ ...filters, month: [] });
                 } else {
@@ -2487,14 +2560,14 @@ export default function Ventas() {
         </div>
 
         {/* BOTONES DE EXPORTACIÓN */}
-        <div className={`col-12 col-md-1 d-flex gap-2 justify-content-md-end mt-3 mt-md-0 ${!isMobile && 'ms-4'}`}>
+        {/* <div className={`col-12 col-md-1 d-flex gap-2 justify-content-md-end mt-3 mt-md-0 ${!isMobile && 'ms-4'}`}>
           <button onClick={exportToExcel} className="btn btn-outline-success d-flex align-items-center flex-fill justify-content-center" title="Exportar Excel">
             <Icons.FileSpreadsheet size={16} /> <span className="d-md-none ms-2">Excel</span>
           </button>
           <button onClick={exportToPdf} className="btn btn-outline-danger d-flex align-items-center flex-fill justify-content-center" title="Exportar PDF">
             <Icons.FileText size={16} /> <span className="d-md-none ms-2">PDF</span>
           </button>
-        </div>
+        </div> */}
       </div>
 
 
@@ -2510,9 +2583,6 @@ export default function Ventas() {
           <div className="col-12 col-sm-6 col-lg-3">
             <KpiCard title="Facturas y notas" value={kpiData.invoices} subtitle="Documentos únicos" />
           </div>
-          {/* <div className="col-12 col-sm-6 col-lg-3">
-            <KpiCard title="Clientes" value={kpiData.customers} subtitle="Clientes únicos" />
-          </div> */}
           <div className="col-12 col-sm-6 col-lg-3">
             <KpiCardMargen 
               title="Margen" 
@@ -2762,7 +2832,7 @@ export default function Ventas() {
                                 {/* 2. Ventas / Meta (Barra dual) */}
                                 <td className="py-2">
                                   <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
-                                    <span className="fw-bold ms-0">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(3) : (row.ventas / 1000000).toFixed(3)} k</span>
+                                    <span className="fw-bold ms-0">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(0) : (row.ventas / 1000000).toFixed(0)} M</span>
                                     <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
                                       Meta ${(row.presupuesto / 1000000).toFixed(0)} M
                                     </span>
@@ -2937,7 +3007,7 @@ export default function Ventas() {
                               {/* 2. Ventas / Meta (Barra dual) */}
                               <td className="py-2">
                                 <div className="d-flex align-items-center justify-content-between mb-1" style={{ fontSize: '0.8rem' }}>
-                                  <span className="fw-bold ms-0">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(3) : (row.ventas / 1000000).toFixed(3)} k</span>
+                                  <span className="fw-bold ms-0">${row.ventas > 1000000 ? (row.ventas / 1000000).toFixed(0) : (row.ventas / 1000000).toFixed(0)} M</span>
                                   <span style={{ color: '#888', fontSize: '0.75rem' }}>
                                     Meta ${(row.presupuesto / 1000000).toFixed(0)} M
                                   </span>
