@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import KpiCard from '../../components/KpiCard';
 import { findBudgets } from '../../services/budgetService';
 import KpiCardMargen from '../../components/KpiCardMargen';
@@ -29,6 +29,7 @@ import Chulo from '../../assets/chulo-verde.png'
 import Select, { components } from 'react-select';
 import * as XLSX from 'xlsx';
 import Swal from 'sweetalert2';
+import { CustomValueContainer } from '../../components/CustomValueContainer';
 
 const COLORES_RANKING_VENDEDORES = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#6f42c1'];
 const COLORES_RANKING_CLIENTES = ['#1cc88a', '#4e73df', '#e74a3b', '#f6c23e', '#36b9cc'];
@@ -187,21 +188,24 @@ const customSelectStyles2 = {
 
 const customSelectStyles = {
   // 1. Contenedor principal del input
-  control: (base, state) => ({
-    ...base,
-    borderRadius: 'var(--radius, 0.375rem)',
-    backgroundColor: 'var(--panel, #ffffff)',
-    borderColor: state.isFocused ? 'var(--blue, #2563eb)' : 'var(--line, #d9e2ef)',
-    color: 'var(--ink, #0f172a)',
-    minHeight: '30px',
-    maxHeight: '50px',
-    overflowY: 'auto',
-    alignItems: 'flex-start',
-    boxShadow: 'none',
-    '&:hover': { 
-      borderColor: 'var(--blue, #2563eb)' 
+  control: (base, state) => {
+    const hasValue = state.hasValue && state.getValue().length > 0;
+    return {
+      ...base,
+      borderRadius: 'var(--radius, 0.375rem)',
+      backgroundColor: hasValue ? 'var(--blue-light, #eff6ff)' : 'var(--panel, #ffffff)',
+      borderColor: state.isFocused ? 'var(--blue, #2563eb)' : 'var(--line, #d9e2ef)',
+      color: 'var(--ink, #0f172a)',
+      minHeight: '30px',
+      maxHeight: '50px',
+      overflowY: 'auto',
+      alignItems: 'flex-start',
+      boxShadow: 'none',
+      '&:hover': {
+        borderColor: 'var(--blue, #2563eb)'
+      }
     }
-  }),
+  },
 
   menu: (base) => ({
     ...base,
@@ -224,6 +228,7 @@ const customSelectStyles = {
   }),
 
   // 3. Contenedor de la X global y la flechita
+
   indicatorsContainer: (base) => ({
     ...base,
     alignSelf: 'flex-start',
@@ -284,17 +289,20 @@ const customSelectStyles = {
   }),
 
   // 8. El texto de ayuda ("Buscar...")
-  placeholder: (base) => ({
-    ...base,
-    margin: 0,
-    paddingTop: 0,
-    paddingBottom: 0,
-    position: 'absolute',
-    top: '12px', // 👈 Ajustado para alinearse perfecto con el padding top reducido
-    left: '6px',
-    color: 'var(--muted, #64748b)',
-    fontSize: '0.85rem'
-  }),
+  placeholder: (base, state) => {
+    const hasValue = state.hasValue && state.getValue().length > 0;
+    return {
+      ...base,
+      margin: 0,
+      paddingTop: 0,
+      paddingBottom: 0,
+      position: 'absolute',
+      top: '12px', // 👈 Ajustado para alinearse perfecto con el padding top reducido
+      left: '6px',
+      color: hasValue ? 'var(--blue, #2563eb)' : 'var(--muted, #64748b)',
+      fontSize: '0.85rem'
+    }
+  },
 
   // 9. Estilos de los badges seleccionados
   multiValue: (base) => ({
@@ -306,7 +314,7 @@ const customSelectStyles = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    maxWidth: '200px', 
+    maxWidth: '200px',
   }),
 
   // 10. Texto dentro del badge
@@ -397,135 +405,166 @@ export default function Ventas() {
     textMuted: '#64748b' // Gris para el texto secundario
   };
 
-// 1. Extraemos excluidos fuera del renderizado para evitar recrearlos en memoria
+  // 1. Extraemos excluidos fuera del renderizado para evitar recrearlos en memoria
   const EXCLUDED_SELLERS = [
     'CEBALLOS ARISTIZABAL IVAN ORLANDO',
     'CEBALLOS DE BRAVO BERTHA LUCIA'
   ];
 
+  // Si EXCLUDED_SELLERS es un Array, conviértelo a Set fuera del componente O(1) de búsqueda
+  const EXCLUDED_SELLERS_SET = new Set(EXCLUDED_SELLERS);
+
+  // Optimización fuera de la función para evitar re-instanciación
+  const CURRENT_DATE = new Date();
+  const CURRENT_YEAR_STR = String(CURRENT_DATE.getFullYear());
+  const CURRENT_MONTH_NUM_STR = String(CURRENT_DATE.getMonth() + 1).padStart(2, '0');
+
   useEffect(() => {
-    Swal.fire({
-      title: 'Cargando',
-      text: 'Por favor, espera mientras carga la información...',
-      allowOutsideClick: false,
-      showConfirmButton: false,
-      didOpen: () => Swal.showLoading()
-    });
+    let isMounted = true;
 
-    const currentYear = new Date().getFullYear();
+    const loadData = async () => {
+      // 1. Desactivar animaciones pesadas de SweetAlert para evitar congelamiento de interfaz
+      Swal.fire({
+        title: 'Cargando',
+        text: 'Por favor, espera mientras carga la información...',
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => {
+          Swal.showLoading();
+        }
+      });
 
-    // OPTIMIZACIÓN 1: Peticiones en paralelo con Promise.all
-    Promise.all([findBudgets(), findMargins(), findSales()])
-      .then(([{ data: budgets }, { data: margins }, { data: sales }]) => {
-        
-        // --- Procesar Presupuestos ---
+      const currentYear = CURRENT_DATE.getFullYear();
+
+      try {
+        // 2. Peticiones paralelas
+        const [budgetsRes, marginsRes, salesRes] = await Promise.all([
+          findBudgets(currentYear),
+          findMargins(currentYear),
+          findSales(currentYear)
+        ]);
+
+        if (!isMounted) return;
+
+        const budgets = budgetsRes.data || [];
+        const margins = marginsRes.data || [];
+        const sales = salesRes.data || [];
+
+        // --- Procesar Presupuestos (Calculado eficientemente) ---
+        let budgetYearTotal = 0;
+        for (let i = 0; i < budgets.length; i++) {
+          budgetYearTotal += Number(budgets[i].monto) || 0;
+        }
         setTotalBudget(budgets);
-        const budgetYearTotal = budgets.reduce((acc, item) => {
-          return Number(item.anio) === currentYear ? acc + (Number(item.monto) || 0) : acc;
-        }, 0);
         setYearBudget(budgetYearTotal);
 
         // --- Procesar Márgenes ---
+        let marginSum = 0;
+        const marginLen = margins.length;
+        for (let i = 0; i < marginLen; i++) {
+          marginSum += Number(margins[i].expectedMargin) || 0;
+        }
         setTotalMargin(margins);
-        const filteredMargins = margins.filter(item => Number(item.anio) === currentYear);
-        const marginSum = filteredMargins.reduce((acc, item) => acc + (Number(item.expectedMargin) || 0), 0);
-        // Evitar división por cero
-        const marginAvg = filteredMargins.length > 0 ? (marginSum / filteredMargins.length).toFixed(2) : '0.00';
-        setYearMargin(marginAvg);
+        setYearMargin(marginLen > 0 ? (marginSum / marginLen).toFixed(2) : '0.00');
 
         // --- Procesar Ventas ---
         procesoInicial(sales);
-      })
-      .catch((error) => {
+
+      } catch (error) {
         console.error('Error al cargar la información:', error);
-      })
-      .finally(() => {
-        // OPTIMIZACIÓN 2: Swal.close() garantizado solo cuando TODO haya terminado
-        Swal.close();
-      });
-  }, []);
-
-  const procesoInicial = (data) => {
-    const currentYearStr = String(new Date().getFullYear());
-    const currentMonthNumStr = String(new Date().getMonth() + 1).padStart(2, '0');
-
-    // Estructuras para acumular valores únicos en UN SOLO RECORRIDO
-    const sets = {
-      sellers: new Set(),
-      lines: new Set(),
-      cities: new Set(),
-      clientTypes: new Set(),
-      suppliers: new Set(),
-      listPrice: new Set(),
-      years: new Set()
+        if (isMounted) {
+          Swal.fire('Error', 'No se pudo cargar la información', 'error');
+        }
+      } finally {
+        if (isMounted) {
+          Swal.close();
+        }
+      }
     };
 
-    const initialFilteredRows = [];
-    const dataNormalized = new Array(data.length);
+    loadData();
 
-    // OPTIMIZACIÓN 3: Recorrido ÚNICO (O(N)) sobre el Array de Ventas
-    for (let i = 0; i < data.length; i++) {
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const procesoInicial = useCallback((data) => {
+    const dataLen = data.length;
+    
+    // Estructuras para Sets
+    const sellersSet = new Set();
+    const linesSet = new Set();
+    const citiesSet = new Set();
+    const clientTypesSet = new Set();
+    const suppliersSet = new Set();
+    const listPriceSet = new Set();
+    const yearsSet = new Set();
+
+    const initialFilteredRows = [];
+    const dataNormalized = new Array(dataLen);
+
+    // OPTIMIZACIÓN CRÍTICA: Iterador for directo sin spreads innecesarios
+    for (let i = 0; i < dataLen; i++) {
       const item = data[i];
 
-      // 1. Normalización de fecha y guardado
+      // 1. Mutar/asignar directamente para evitar la sobrecarga de destructuring ({...item})
       const parsedDate = normalizeDate(item.date);
-      const normalizedItem = { ...item, parsedDate };
-      dataNormalized[i] = normalizedItem;
+      item.parsedDate = parsedDate; 
+      dataNormalized[i] = item;
 
-      // 2. Filtrado de vendedores excluidos
-      const isExcluded = EXCLUDED_SELLERS.includes(item.vendedor);
+      // 2. Búsqueda O(1) con Set en lugar de O(N) con Array.includes
+      const isExcluded = EXCLUDED_SELLERS_SET.has(item.vendedor);
       if (!isExcluded) {
-        initialFilteredRows.push(normalizedItem);
+        initialFilteredRows.push(item);
       }
 
-      // 3. Extracción de valores únicos para los Selects
-      if (item.vendedor) sets.sellers.add(item.vendedor);
-      if (item.linea) sets.lines.add(item.linea);
-      if (item.co) sets.cities.add(item.co);
-      if (item.typeClient) sets.clientTypes.add(item.typeClient);
-      if (item.proveedor) sets.suppliers.add(item.proveedor);
-      if (item.descLp) sets.listPrice.add(item.descLp);
+      // 3. Extracción directo con evaluación de existencia rápida
+      if (item.vendedor) sellersSet.add(item.vendedor);
+      if (item.linea) linesSet.add(item.linea);
+      if (item.co) citiesSet.add(item.co);
+      if (item.typeClient) clientTypesSet.add(item.typeClient);
+      if (item.proveedor) suppliersSet.add(item.proveedor);
+      if (item.descLp) listPriceSet.add(item.descLp);
 
-      // Parseo optimizado de años
+      // 4. Extracción rápida de años mediante RegEx/Substring sin instanciar 'new Date()'
       if (item.date) {
-        const dateObj = new Date(item.date);
-        if (!isNaN(dateObj.getTime())) {
-          sets.years.add(String(dateObj.getFullYear()));
-        } else if (typeof item.date === 'string' && item.date.includes('/')) {
-          const parts = item.date.split('/');
-          if (parts.length === 3) sets.years.add(parts[2]);
+        if (typeof item.date === 'string') {
+          const yearMatch = item.date.match(/\d{4}/);
+          if (yearMatch) yearsSet.add(yearMatch[0]);
+        } else if (item.date instanceof Date) {
+          yearsSet.add(String(item.date.getFullYear()));
         }
       }
     }
 
-    // Guardar estados masivos
+    // Convertir Sets a Arrays una sola vez
+    const allUniqueSellers = Array.from(sellersSet);
+    const defaultSelectedSellers = allUniqueSellers.filter(s => !EXCLUDED_SELLERS_SET.has(s));
+    const uniqueYears = Array.from(yearsSet).sort((a, b) => b - a);
+    const uniqueMonth = mesesConNumero.map(m => m.nombre);
+
+    // Actualizaciones de Estado en Lote (Batching)
     setRawSalesData(dataNormalized);
     setSalesData(initialFilteredRows);
     setSalesRowsCount(initialFilteredRows.length);
     setCurrentPage(1);
 
-    // Convertir Sets a Arrays
-    const allUniqueSellers = Array.from(sets.sellers);
-    const defaultSelectedSellers = allUniqueSellers.filter(s => !EXCLUDED_SELLERS.includes(s));
-    const uniqueYears = Array.from(sets.years).sort((a, b) => b - a);
-    const uniqueMonth = mesesConNumero.map(m => m.nombre);
-
     setFilterOptions({
       sellers: allUniqueSellers,
-      lines: Array.from(sets.lines),
-      cities: Array.from(sets.cities),
-      clientTypes: Array.from(sets.clientTypes),
+      lines: Array.from(linesSet),
+      cities: Array.from(citiesSet),
+      clientTypes: Array.from(clientTypesSet),
       years: uniqueYears,
       months: uniqueMonth,
-      suppliers: Array.from(sets.suppliers),
-      listPrice: Array.from(sets.listPrice)
+      suppliers: Array.from(suppliersSet),
+      listPrice: Array.from(listPriceSet)
     });
 
-    // Detección de Fecha por Defecto
-    const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === currentMonthNumStr);
+    const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === CURRENT_MONTH_NUM_STR);
     const currentMonthName = currentMonthObj?.nombre;
 
-    const defaultYear = uniqueYears.includes(currentYearStr) ? currentYearStr : (uniqueYears[0] || '');
+    const defaultYear = uniqueYears.includes(CURRENT_YEAR_STR) ? CURRENT_YEAR_STR : (uniqueYears[0] || '');
     const defaultMonthName = (currentMonthName && uniqueMonth.includes(currentMonthName))
       ? currentMonthName
       : (uniqueMonth[0] || '');
@@ -539,7 +578,7 @@ export default function Ventas() {
 
     // KPIs
     setKpiData(calculateKPIs(initialFilteredRows));
-  };
+  }, []);
 
   const mesesConNumero = [
     { numero: '01', nombre: "Enero", abreviatura: "Ene" },
@@ -685,49 +724,66 @@ export default function Ventas() {
   };
 
   // Función para calcular los KPIs basados en el listado actual de datos
-    const calculateKPIs = (rows, expectedMargin) => {
+  const calculateKPIs = (rows, expectedMargin) => {
     if (!rows || rows.length === 0) {
-        return { totalSales: '$0', goalProgress: '0%', invoices: '0', customers: '0', margen: '0%' };
+      return { 
+        totalSales: '$0', 
+        goalProgress: '0%', 
+        invoices: '0', 
+        customers: '0', 
+        margen: '0%' 
+      };
     }
 
-    // 1. Total Ventas: Suma de la columna 'valor'
-    const total = rows.reduce((sum, row) => sum + (Number(row.valor) || 0), 0);
+    const rowsLen = rows.length;
+    let total = 0;
+    let margenFill = 0;
+    const customersSet = new Set();
 
-    // 2. Facturas Únicas: Contamos cuántos códigos de documento 'doc' diferentes existen
-    /* const uniqueInvoices = new Set(rows.map(row => row.doc).filter(Boolean)).size; */
-    const uniqueInvoices = rows.length;
+    // OPTIMIZACIÓN CRÍTICA: Un solo bucle O(N) para calcular todo a la vez
+    for (let i = 0; i < rowsLen; i++) {
+      const row = rows[i];
 
-    // 3. Clientes Únicos: Contamos cuántas cédulas/nit 'cliente' diferentes existen
-    const uniqueCustomers = new Set(rows.map(row => row.cliente).filter(Boolean)).size;
+      // 1. Acumular total de ventas
+      total += Number(row.valor) || 0;
 
-    // 4. CÁLCULO DEL MARGEN BRUTO REAL PONDERADO (%)
-    const margenFill = rows.reduce((sum, row) => sum + (Number(row.margen) || 0), 0);
-    const rowsMargen = rows.length
-    const suMargen = margenFill / rowsMargen
-    expectedMargin = calculateMargin(filters.month, filters.year, filters.city)
-    /* const suMargen = rows.reduce((sum, row) => sum + (parseFloat(row.margen) || 0), 0);
-    const calculateMargen = suMargen / rows.length; */
+      // 2. Acumular margen
+      margenFill += Number(row.margen) || 0;
 
-    // 6. Cumplimiento Meta
-    const metaEmpresa = calculateGoal(filters.month, filters.year)
-    const porcentajeMeta = (parseFloat(total) / metaEmpresa) * 100 /* Math.min((total / metaEmpresa) * 100, 100); */ // Tope de 100%
+      // 3. Registrar clientes únicos directamente en el Set sin usar .map() o .filter()
+      if (row.cliente) {
+        customersSet.add(row.cliente);
+      }
+    }
 
-    // 7. DETERMINAR ESTADO DEL SEMÁFORO
-    let marginStatus = 'danger'; // Rojo si está por debajo
-    if (suMargen >= expectedMargin) {
-      marginStatus = 'success'; // Verde si alcanza o supera la meta
-    } else if (suMargen >= expectedMargin - 2) {
-      marginStatus = 'warning'; // Amarillo (tolerancia de hasta 2% por debajo)
+    // Cálculos agrupados en memoria
+    const uniqueInvoices = rowsLen;
+    const uniqueCustomers = customersSet.size;
+    const suMargen = rowsLen > 0 ? (margenFill / rowsLen) : 0;
+
+    // Obtener margen esperado y meta
+    const calculatedExpectedMargin = calculateMargin(filters.month, filters.year, filters.city);
+    const metaEmpresa = calculateGoal(filters.month, filters.year) || 0;
+
+    // Evitar división por cero o NaN
+    const porcentajeMeta = metaEmpresa > 0 ? (total / metaEmpresa) * 100 : 0;
+
+    // Determinar estado del semáforo
+    let marginStatus = 'danger';
+    if (suMargen >= calculatedExpectedMargin) {
+      marginStatus = 'success';
+    } else if (suMargen >= calculatedExpectedMargin - 2) {
+      marginStatus = 'warning';
     }
 
     return {
-        totalSales: `$${Math.round(total).toLocaleString('es-CO')}`,
-        goalProgress: `${porcentajeMeta.toFixed(2)}%`,
-        invoices: uniqueInvoices.toLocaleString('es-CO'),
-        customers: uniqueCustomers.toLocaleString('es-CO'),
-        margen: `${suMargen.toFixed(2)}%`,
-        expectedMargin: expectedMargin,
-        marginStatus: marginStatus,
+      totalSales: `$${Math.round(total).toLocaleString('es-CO')}`,
+      goalProgress: `${porcentajeMeta.toFixed(2)}%`,
+      invoices: uniqueInvoices.toLocaleString('es-CO'),
+      customers: uniqueCustomers.toLocaleString('es-CO'),
+      margen: `${suMargen.toFixed(2)}%`,
+      expectedMargin: calculatedExpectedMargin,
+      marginStatus: marginStatus,
     };
   };
 
@@ -762,6 +818,95 @@ export default function Ventas() {
   // Este subconjunto contiene únicamente las 100 filas de la página actual
   const currentRows = salesData.slice(indexOfFirstRow, indexOfLastRow);
   const totalPages = Math.ceil(salesData.length / rowsPerPage);
+
+  const detectDateGaps = (transformedRows) => {
+    // 1. Extraer y convertir cada fecha garantizando cero desfase horario
+    const timestamps = transformedRows
+      .map(row => {
+        // Intentar obtener el valor de la fecha
+        const rawDate = row.parsedDate || row.date;
+        if (!rawDate) return null;
+
+        let year, month, day;
+
+        if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+          year = rawDate.getFullYear();
+          month = rawDate.getMonth();
+          day = rawDate.getDate();
+        } else if (typeof rawDate === 'string') {
+          // Manejar formato "DD/MM/YYYY" o "DD-MM-YYYY"
+          if (rawDate.includes('/') || (rawDate.includes('-') && rawDate.split('-')[0].length <= 2)) {
+            const parts = rawDate.split(/[/-]/);
+            if (parts.length === 3) {
+              day = parseInt(parts[0], 10);
+              month = parseInt(parts[1], 10) - 1;
+              year = parseInt(parts[2], 10);
+            }
+          } 
+          // Manejar formato ISO "YYYY-MM-DD"
+          else if (rawDate.includes('-')) {
+            const parts = rawDate.split('T')[0].split('-');
+            if (parts.length === 3) {
+              year = parseInt(parts[0], 10);
+              month = parseInt(parts[1], 10) - 1;
+              day = parseInt(parts[2], 10);
+            }
+          }
+        }
+
+        if (year && month !== undefined && day) {
+          // Se crea el timestamp en UTC puro para evitar problemas con zonas horarias
+          return Date.UTC(year, month, day);
+        }
+
+        return null;
+      })
+      .filter(Boolean);
+
+    if (timestamps.length === 0) return [];
+
+    // 2. Eliminar duplicados y ordenar cronológicamente
+    const uniqueSortedTimes = Array.from(new Set(timestamps)).sort((a, b) => a - b);
+
+    const gaps = [];
+    const ONE_DAY_MS = 1000 * 60 * 60 * 24;
+
+    // 3. Evaluar la diferencia entre días consecutivos
+    for (let i = 0; i < uniqueSortedTimes.length - 1; i++) {
+      const currentMs = uniqueSortedTimes[i];
+      const nextMs = uniqueSortedTimes[i + 1];
+
+      const diffDays = Math.round((nextMs - currentMs) / ONE_DAY_MS);
+
+      // Si la diferencia es >= 3 días, hay al menos 2 días vacíos intermedios
+      if (diffDays >= 3) {
+        const gapStartMs = currentMs + ONE_DAY_MS;
+        const gapEndMs = nextMs - ONE_DAY_MS;
+
+        const missingDaysCount = diffDays - 1;
+
+        // Función para formatear fechas desde el timestamp en UTC neutro
+        const formatDateStr = (ms) => {
+          const d = new Date(ms);
+          const dayStr = String(d.getUTCDate() + 1 ).padStart(2, '0');
+          const monthStr = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const yearStr = d.getUTCFullYear();
+          return `${dayStr}/${monthStr}/${yearStr}`;
+        };
+
+        const intervalStr = gapStartMs === gapEndMs
+          ? `${formatDateStr(gapStartMs)}`
+          : `del ${formatDateStr(gapStartMs)} al ${formatDateStr(gapEndMs)}`;
+
+        gaps.push({
+          interval: intervalStr,
+          missingDays: missingDaysCount
+        });
+      }
+    }
+
+    return gaps;
+  };
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -822,17 +967,14 @@ export default function Ventas() {
         "Desc. lista de precios": "descLp"
       };
 
-      // Transformación en UN SOLO PASO limpia y sin errores de clave
       const transformedRows = jsonRows.map(row => {
         const newRow = {};
-        
         for (const originalKey in row) {
           const newKey = columnMapping[originalKey] || originalKey;
-          
+            
           if (newKey === 'valor' || newKey === 'subtotal') {
             newRow[newKey] = parseCurrencyToNumber(row[originalKey]);
           } else if (newKey === 'date') {
-            // Guardamos la fecha original parsed o la convertida
             const formattedDate = parseExcelDate(row[originalKey]);
             newRow[newKey] = formattedDate;
           } else if (newKey === 'co') {
@@ -851,7 +993,6 @@ export default function Ventas() {
           }
         }
 
-        // Asignar parsedDate correctamente después de que 'date' ha sido normalizada
         if (typeof normalizeDate === 'function') {
           newRow.parsedDate = normalizeDate(newRow.date);
         } else {
@@ -863,13 +1004,11 @@ export default function Ventas() {
 
       setRawSalesData(transformedRows);
 
-      // 🎯 1. VENDEDORES A EXCLUIR EN LA VISTA INICIAL
       const excludedSellers = [
         'CEBALLOS ARISTIZABAL IVAN ORLANDO',
         'CEBALLOS DE BRAVO BERTHA LUCIA'
       ];
 
-      // 🎯 2. FILTRAR REGISTROS INICIALES SIN DICHOS VENDEDORES
       const initialFilteredRows = transformedRows.filter(
         item => !excludedSellers.includes(item.vendedor)
       );
@@ -886,18 +1025,15 @@ export default function Ventas() {
       const uniqueClientTypes = [...new Set(transformedRows.map(item => item.typeClient).filter(Boolean))];
       const uniqueSupplier = [...new Set(transformedRows.map(item => item.proveedor).filter(Boolean))];
       const uniqueListPrice = [...new Set(transformedRows.map(item => item.descLp).filter(Boolean))];
-      
-      // Obtención segura de Años
+        
       const uniqueYears = [...new Set(transformedRows.map(item => {
         if (!item.date) return null;
-        
-        // Si date viene como string DD/MM/YYYY
+          
         if (typeof item.date === 'string' && item.date.includes('/')) {
           const parts = item.date.split('/');
           return parts.length === 3 ? parts[2] : null;
         }
 
-        // Si date viene en formato ISO o JavaScript Date
         const parsedDate = new Date(item.date);
         if (!isNaN(parsedDate.getTime())) {
           return String(parsedDate.getFullYear());
@@ -905,7 +1041,7 @@ export default function Ventas() {
 
         return null;
       }).filter(Boolean))].sort((a, b) => b - a);
-      
+        
       const uniqueMonth = mesesConNumero.map(m => m.nombre);
 
       setFilterOptions({
@@ -919,11 +1055,10 @@ export default function Ventas() {
         listPrice: uniqueListPrice,
       });
 
-      // 🎯 3. DETECTAR AÑO Y MES ACTUAL
       const today = new Date();
       const currentYearStr = String(today.getFullYear());
       const currentMonthNumStr = String(today.getMonth() + 1).padStart(2, '0');
-      
+        
       const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === currentMonthNumStr);
       const currentMonthName = currentMonthObj ? currentMonthObj.nombre : null;
 
@@ -932,7 +1067,6 @@ export default function Ventas() {
         ? currentMonthName
         : (uniqueMonth[0] || '');
 
-      // 🎯 4. ACTUALIZAR ESTADO DE FILTROS ACTIVO
       setFilters(prev => ({
         ...prev,
         seller: defaultSelectedSellers,
@@ -943,9 +1077,53 @@ export default function Ventas() {
       const initialKpis = calculateKPIs(initialFilteredRows);
       setKpiData(initialKpis);
 
-      setTimeout(() => {
-        Swal.close(); 
-      }, 800); 
+      // 🎯 DETECCIÓN DE DIAS SIN REGISTROS (2 O MÁS DÍAS)
+      const dateGaps = detectDateGaps(transformedRows);
+
+      if (dateGaps.length > 0) {
+        const gapListHtml = `
+          <p style="text-align: left; font-size: 0.9rem; margin-bottom: 8px;">
+            Se encontraron lapsos de 2 o más días consecutivos sin movimientos en la información cargada:
+          </p>
+          <ul style="text-align: left; font-size: 0.85rem; max-height: 180px; overflow-y: auto; padding-left: 20px;">
+            ${dateGaps.map(gap => `<li><strong>${gap.interval}</strong> (${gap.missingDays} días sin datos)</li>`).join('')}
+          </ul>
+          <p style="text-align: left; font-size: 0.85rem; font-weight: bold; margin-top: 10px; color: #374151;">
+            ¿Deseas continuar procesando el archivo o cancelar para cargar uno nuevo?
+          </p>
+        `;
+
+        Swal.fire({
+          icon: 'warning',
+          title: 'Atención: Días sin registros',
+          html: gapListHtml,
+          showCancelButton: true,
+          confirmButtonText: 'Sí, continuar',
+          cancelButtonText: 'Volver a cargar archivo',
+          confirmButtonColor: '#2563eb',
+          cancelButtonColor: '#dc2626',
+          allowOutsideClick: false,
+          allowEscapeKey: false
+        }).then((result) => {
+          if (!result.isConfirmed) {
+            // ❌ El usuario decidió CANCELAR y volver a cargar:
+            // Limpiamos los estados creados para obligar a cargar de nuevo
+            setSelectedFile(null);
+            setRawSalesData([]);
+            setSalesData([]);
+            setSalesRowsCount(0);
+            
+            // Si tienes una referencia al input de tipo file, reseteamos su valor
+            if (e.target) {
+              e.target.value = '';
+            }
+          }
+        });
+      } else {
+        setTimeout(() => {
+          Swal.close(); 
+        }, 800); 
+      }
     };
 
     reader.readAsBinaryString(file);
@@ -2195,25 +2373,22 @@ export default function Ventas() {
           <Select
             isMulti
             closeMenuOnSelect={false}
-            hideSelectedOptions={false}
+            hideSelectedOptions={true}
             blurInputOnSelect={false}
-            components={{ Option: CheckboxOption }}
-            options={[
-              { value: '*', label: '--- Seleccionar Todos ---' },
-              ...filterOptions.sellers.map(s => ({ value: s, label: s }))
-            ]}
-            value={
+            components={{ ValueContainer: CustomValueContainer }}
+            options={
               filterOptions.sellers.length > 0 && filters.seller.length === filterOptions.sellers.length
-                ? [
+                ? []
+                : [
                     { value: '*', label: '--- Seleccionar Todos ---' },
                     ...filterOptions.sellers.map(s => ({ value: s, label: s }))
                   ]
-                : filters.seller.map(s => ({ value: s, label: s }))
             }
+            value={filters.seller.map(s => ({ value: s, label: s }))}
             onChange={(selectedOptions) => {
               // Manejo cuando se limpia el campo completamente
               if (!selectedOptions || selectedOptions.length === 0) {
-                setFilters({ ...filters, seller: [] });
+                setFilters(prev => ({ ...prev, seller: [] }));
                 return;
               }
 
@@ -2223,22 +2398,22 @@ export default function Ventas() {
               if (hasSelectAll) {
                 // Alternar: si ya estaban todos marcados, vaciamos; si no, seleccionamos todos los vendedores
                 if (filters.seller.length === filterOptions.sellers.length) {
-                  setFilters({ ...filters, seller: [] });
+                  setFilters(prev => ({ ...prev, seller: [] }));
                 } else {
-                  setFilters({
-                    ...filters,
+                  setFilters(prev => ({
+                    ...prev,
                     seller: filterOptions.sellers
-                  });
+                  }));
                 }
               } else {
                 // Selección individual
-                setFilters({
-                  ...filters,
+                setFilters(prev => ({
+                  ...prev,
                   seller: selectedOptions.map(opt => opt.value)
-                });
+                }));
               }
             }}
-            placeholder="Buscar..."
+            placeholder={filters.seller && filters.seller.length > 0 ? 'CON FILTRO' : 'Buscar...'}
             styles={customSelectStyles}
           />
         </div>
@@ -2249,24 +2424,21 @@ export default function Ventas() {
           <Select
             isMulti
             closeMenuOnSelect={false}
-            hideSelectedOptions={false}
+            hideSelectedOptions={true}
             blurInputOnSelect={false}
-            components={{ Option: CheckboxOption }}
-            options={[
-              { value: '*', label: '--- Seleccionar Todos ---' },
-              ...filterOptions.lines.map(l => ({ value: l, label: l }))
-            ]}
-            value={
+            components={{ ValueContainer: CustomValueContainer }} // 👈 Inyecta el ValueContainer ajustado
+            options={
               filterOptions.lines.length > 0 && filters.line.length === filterOptions.lines.length
-                ? [
+                ? []
+                : [
                     { value: '*', label: '--- Seleccionar Todos ---' },
                     ...filterOptions.lines.map(l => ({ value: l, label: l }))
                   ]
-                : filters.line.map(l => ({ value: l, label: l }))
             }
+            value={filters.line.map(l => ({ value: l, label: l }))}
             onChange={(selectedOptions) => {
               if (!selectedOptions || selectedOptions.length === 0) {
-                setFilters({ ...filters, line: [] });
+                setFilters(prev => ({ ...prev, line: [] }));
                 return;
               }
 
@@ -2274,21 +2446,21 @@ export default function Ventas() {
 
               if (hasSelectAll) {
                 if (filters.line.length === filterOptions.lines.length) {
-                  setFilters({ ...filters, line: [] });
+                  setFilters(prev => ({ ...prev, line: [] }));
                 } else {
-                  setFilters({
-                    ...filters,
+                  setFilters(prev => ({
+                    ...prev,
                     line: filterOptions.lines
-                  });
+                  }));
                 }
               } else {
-                setFilters({
-                  ...filters,
+                setFilters(prev => ({
+                  ...prev,
                   line: selectedOptions.map(opt => opt.value)
-                });
+                }));
               }
             }}
-            placeholder="Buscar..."
+            placeholder={filters.line && filters.line.length > 0 ? 'CON FILTRO' : 'Buscar...'}
             styles={customSelectStyles}
           />
         </div>
@@ -2299,24 +2471,21 @@ export default function Ventas() {
           <Select
             isMulti
             closeMenuOnSelect={false}
-            hideSelectedOptions={false}
+            hideSelectedOptions={true}
             blurInputOnSelect={false}
-            components={{ Option: CheckboxOption }}
-            options={[
-              { value: '*', label: '--- Seleccionar Todos ---' },
-              ...filterOptions.cities.map(c => ({ value: c, label: c }))
-            ]}
-            value={
+            components={{ ValueContainer: CustomValueContainer }}
+            options={
               filterOptions.cities.length > 0 && filters.city.length === filterOptions.cities.length
-                ? [
+                ? []
+                : [
                     { value: '*', label: '--- Seleccionar Todos ---' },
                     ...filterOptions.cities.map(c => ({ value: c, label: c }))
                   ]
-                : filters.city.map(c => ({ value: c, label: c }))
             }
+            value={filters.city.map(c => ({ value: c, label: c }))}
             onChange={(selectedOptions) => {
               if (!selectedOptions || selectedOptions.length === 0) {
-                setFilters({ ...filters, city: [] });
+                setFilters(prev => ({ ...prev, city: [] }));
                 return;
               }
 
@@ -2324,21 +2493,21 @@ export default function Ventas() {
 
               if (hasSelectAll) {
                 if (filters.city.length === filterOptions.cities.length) {
-                  setFilters({ ...filters, city: [] });
+                  setFilters(prev => ({ ...prev, city: [] }));
                 } else {
-                  setFilters({
-                    ...filters,
+                  setFilters(prev => ({
+                    ...prev,
                     city: filterOptions.cities
-                  });
+                  }));
                 }
               } else {
-                setFilters({
-                  ...filters,
+                setFilters(prev => ({
+                  ...prev,
                   city: selectedOptions.map(opt => opt.value)
-                });
+                }));
               }
             }}
-            placeholder="Buscar..."
+            placeholder={filters.city && filters.city.length > 0 ? 'CON FILTRO' : 'Buscar...'}
             styles={customSelectStyles}
           />
         </div>
@@ -2349,24 +2518,21 @@ export default function Ventas() {
           <Select
             isMulti
             closeMenuOnSelect={false}
-            hideSelectedOptions={false}
+            hideSelectedOptions={true}
             blurInputOnSelect={false}
-            components={{ Option: CheckboxOption }}
-            options={[
-              { value: '*', label: '--- Seleccionar Todos ---' },
-              ...filterOptions.clientTypes.map(t => ({ value: t, label: t }))
-            ]}
-            value={
+            components={{ ValueContainer: CustomValueContainer }}
+            options={
               filterOptions.clientTypes.length > 0 && filters.clientType.length === filterOptions.clientTypes.length
-                ? [
+                ? []
+                : [
                     { value: '*', label: '--- Seleccionar Todos ---' },
                     ...filterOptions.clientTypes.map(t => ({ value: t, label: t }))
                   ]
-                : filters.clientType.map(t => ({ value: t, label: t }))
             }
+            value={filters.clientType.map(t => ({ value: t, label: t }))}
             onChange={(selectedOptions) => {
               if (!selectedOptions || selectedOptions.length === 0) {
-                setFilters({ ...filters, clientType: [] });
+                setFilters(prev => ({ ...prev, clientType: [] }));
                 return;
               }
 
@@ -2374,21 +2540,21 @@ export default function Ventas() {
 
               if (hasSelectAll) {
                 if (filters.clientType.length === filterOptions.clientTypes.length) {
-                  setFilters({ ...filters, clientType: [] });
+                  setFilters(prev => ({ ...prev, clientType: [] }));
                 } else {
-                  setFilters({
-                    ...filters,
+                  setFilters(prev => ({
+                    ...prev,
                     clientType: filterOptions.clientTypes
-                  });
+                  }));
                 }
               } else {
-                setFilters({
-                  ...filters,
+                setFilters(prev => ({
+                  ...prev,
                   clientType: selectedOptions.map(opt => opt.value)
-                });
+                }));
               }
             }}
-            placeholder="Buscar..."
+            placeholder={filters.clientType && filters.clientType.length > 0 ? 'CON FILTRO' : 'Buscar...'}
             styles={customSelectStyles}
           />
         </div>
@@ -2399,24 +2565,21 @@ export default function Ventas() {
           <Select
             isMulti
             closeMenuOnSelect={false}
-            hideSelectedOptions={false}
+            hideSelectedOptions={true}
             blurInputOnSelect={false}
-            components={{ Option: CheckboxOption }}
-            options={[
-              { value: '*', label: '--- Seleccionar Todos ---' },
-              ...filterOptions.suppliers.map(t => ({ value: t, label: t }))
-            ]}
-            value={
+            components={{ ValueContainer: CustomValueContainer }}
+            options={
               filterOptions.suppliers.length > 0 && filters.supplier.length === filterOptions.suppliers.length
-                ? [
+                ? []
+                : [
                     { value: '*', label: '--- Seleccionar Todos ---' },
                     ...filterOptions.suppliers.map(t => ({ value: t, label: t }))
                   ]
-                : filters.supplier.map(t => ({ value: t, label: t }))
             }
+            value={filters.supplier.map(t => ({ value: t, label: t }))}
             onChange={(selectedOptions) => {
               if (!selectedOptions || selectedOptions.length === 0) {
-                setFilters({ ...filters, supplier: [] });
+                setFilters(prev => ({ ...prev, supplier: [] }));
                 return;
               }
 
@@ -2424,21 +2587,21 @@ export default function Ventas() {
 
               if (hasSelectAll) {
                 if (filters.supplier.length === filterOptions.suppliers.length) {
-                  setFilters({ ...filters, supplier: [] });
+                  setFilters(prev => ({ ...prev, supplier: [] }));
                 } else {
-                  setFilters({
-                    ...filters,
+                  setFilters(prev => ({
+                    ...prev,
                     supplier: filterOptions.suppliers
-                  });
+                  }));
                 }
               } else {
-                setFilters({
-                  ...filters,
+                setFilters(prev => ({
+                  ...prev,
                   supplier: selectedOptions.map(opt => opt.value)
-                });
+                }));
               }
             }}
-            placeholder="Buscar..."
+            placeholder={filters.supplier && filters.supplier.length > 0 ? 'CON FILTRO' : 'Buscar...'}
             styles={customSelectStyles}
           />
         </div>
@@ -2449,24 +2612,21 @@ export default function Ventas() {
           <Select
             isMulti
             closeMenuOnSelect={false}
-            hideSelectedOptions={false}
+            hideSelectedOptions={true}
             blurInputOnSelect={false}
-            components={{ Option: CheckboxOption }}
-            options={[
-              { value: '*', label: '--- Seleccionar Todos ---' },
-              ...filterOptions.listPrice.map(t => ({ value: t, label: t }))
-            ]}
-            value={
+            components={{ ValueContainer: CustomValueContainer }}
+            options={
               filterOptions.listPrice.length > 0 && filters.listPrice.length === filterOptions.listPrice.length
-                ? [
+                ? []
+                : [
                     { value: '*', label: '--- Seleccionar Todos ---' },
                     ...filterOptions.listPrice.map(t => ({ value: t, label: t }))
                   ]
-                : filters.listPrice.map(t => ({ value: t, label: t }))
             }
+            value={filters.listPrice.map(t => ({ value: t, label: t }))}
             onChange={(selectedOptions) => {
               if (!selectedOptions || selectedOptions.length === 0) {
-                setFilters({ ...filters, listPrice: [] });
+                setFilters(prev => ({ ...prev, listPrice: [] }));
                 return;
               }
 
@@ -2474,50 +2634,47 @@ export default function Ventas() {
 
               if (hasSelectAll) {
                 if (filters.listPrice.length === filterOptions.listPrice.length) {
-                  setFilters({ ...filters, listPrice: [] });
+                  setFilters(prev => ({ ...prev, listPrice: [] }));
                 } else {
-                  setFilters({
-                    ...filters,
+                  setFilters(prev => ({
+                    ...prev,
                     listPrice: filterOptions.listPrice
-                  });
+                  }));
                 }
               } else {
-                setFilters({
-                  ...filters,
+                setFilters(prev => ({
+                  ...prev,
                   listPrice: selectedOptions.map(opt => opt.value)
-                });
+                }));
               }
             }}
-            placeholder="Buscar..."
+            placeholder={filters.listPrice && filters.listPrice.length > 0 ? 'CON FILTRO' : 'Buscar...'}
             styles={customSelectStyles}
           />
         </div>
 
         {/* filtro por mes */}
-        <div className="col-12 col-sm-6 col-md-2">
+        <div className="col-12 col-sm-6 col-md-3">
           <label className="form-label fw-semibold small mb-1">Mes</label>
           <Select
             isMulti
             closeMenuOnSelect={false}
-            hideSelectedOptions={false}
+            hideSelectedOptions={true}
             blurInputOnSelect={false}
-            components={{ Option: CheckboxOption }}
-            options={[
-              { value: '*', label: '--- Seleccionar Todos ---' },
-              ...filterOptions.months.map(c => ({ value: c, label: c }))
-            ]}
-            value={
+            components={{ ValueContainer: CustomValueContainer }}
+            options={
               filterOptions.months.length > 0 && filters.month.length === filterOptions.months.length
-                ? [
+                ? []
+                : [
                     { value: '*', label: '--- Seleccionar Todos ---' },
                     ...filterOptions.months.map(c => ({ value: c, label: c }))
                   ]
-                : filters.month.map(c => ({ value: c, label: c }))
             }
+            value={filters.month.map(c => ({ value: c, label: c }))}
             onChange={(selectedOptions) => {
               // Manejo cuando se limpia la selección completamente
               if (!selectedOptions || selectedOptions.length === 0) {
-                setFilters({ ...filters, month: [] });
+                setFilters(prev => ({ ...prev, month: [] }));
                 return;
               }
 
@@ -2527,28 +2684,28 @@ export default function Ventas() {
               if (hasSelectAll) {
                 // Alternar: si ya estaban todos los meses seleccionados, vaciamos; si no, marcamos todos
                 if (filters.month.length === filterOptions.months.length) {
-                  setFilters({ ...filters, month: [] });
+                  setFilters(prev => ({ ...prev, month: [] }));
                 } else {
-                  setFilters({
-                    ...filters,
+                  setFilters(prev => ({
+                    ...prev,
                     month: filterOptions.months
-                  });
+                  }));
                 }
               } else {
                 // Selección individual
-                setFilters({
-                  ...filters,
+                setFilters(prev => ({
+                  ...prev,
                   month: selectedOptions.map(opt => opt.value)
-                });
+                }));
               }
             }}
-            placeholder="Buscar..."
+            placeholder={filters.month && filters.month.length > 0 ? 'CON FILTRO' : 'Buscar...'}
             styles={customSelectStyles}
           />
         </div>
 
         {/* filtro por año */}
-        <div className="col-12 col-sm-6 col-md-1">
+        <div className="col-12 col-sm-6 col-md-3">
           <label className="form-label fw-semibold text-secondary small mb-1">Año</label>
           <select 
             value={filters.year}
