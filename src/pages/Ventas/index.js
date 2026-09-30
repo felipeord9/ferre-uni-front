@@ -419,169 +419,168 @@ export default function Ventas() {
   const CURRENT_YEAR_STR = String(CURRENT_DATE.getFullYear());
   const CURRENT_MONTH_NUM_STR = String(CURRENT_DATE.getMonth() + 1).padStart(2, '0');
 
-  useEffect(() => {
-    let isMounted = true;
+useEffect(() => {
+  let isMounted = true;
 
-    const loadData = async () => {
-      // 1. Mostrar Modal de Carga
-      Swal.fire({
-        title: 'Cargando',
-        text: 'Por favor, espera mientras carga la información...',
-        allowOutsideClick: false,
-        showConfirmButton: false,
-        didOpen: () => Swal.showLoading()
-      });
-
-      const currentYear = CURRENT_DATE.getFullYear();
-
-      try {
-        const [budgetsRes, marginsRes, salesRes] = await Promise.all([
-          findBudgets(currentYear),
-          findMargins(currentYear),
-          findSales(currentYear)
-        ]);
-
-        if (!isMounted) return;
-
-        const budgets = budgetsRes.data || [];
-        const margins = marginsRes.data || [];
-        const sales = salesRes.data || [];
-
-        // Presupuestos
-        let budgetYearTotal = 0;
-        for (let i = 0; i < budgets.length; i++) {
-          budgetYearTotal += Number(budgets[i].monto) || 0;
-        }
-        setTotalBudget(budgets);
-        setYearBudget(budgetYearTotal);
-
-        // Márgenes
-        let marginSum = 0;
-        const marginLen = margins.length;
-        for (let i = 0; i < marginLen; i++) {
-          marginSum += Number(margins[i].expectedMargin) || 0;
-        }
-        setTotalMargin(margins);
-        setYearMargin(marginLen > 0 ? (marginSum / marginLen).toFixed(2) : '0.00');
-
-        // --- TRUCO DE RENDIMIENTO ---
-        // Usar setTimeout para permitir que la interfaz respire y el SweetAlert
-        // se dibuje en pantalla antes de congelar el hilo procesando las 40.000 filas.
-        setTimeout(() => {
-          if (isMounted) {
-            procesoInicial(sales);
-            Swal.close();
-          }
-        }, 50);
-
-      } catch (error) {
-        console.error('Error al cargar la información:', error);
-        if (isMounted) {
-          Swal.fire('Error', 'No se pudo cargar la información', 'error');
-        }
-      }
-    };
-
-    loadData();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const procesoInicial = useCallback((data) => {
-    const dataLen = data.length;
-
-    const sellersSet = new Set();
-    const linesSet = new Set();
-    const citiesSet = new Set();
-    const clientTypesSet = new Set();
-    const suppliersSet = new Set();
-    const listPriceSet = new Set();
-    const yearsSet = new Set();
-
-    const initialFilteredRows = [];
-    const dataNormalized = new Array(dataLen);
-
-    for (let i = 0; i < dataLen; i++) {
-      const item = data[i];
-
-      // Optimización en Date: Si ya es String ISO o Date, evitar reconvertir innecesariamente
-      const rawDate = item.date;
-      const parsedDate = rawDate instanceof Date ? rawDate : normalizeDate(rawDate);
-      
-      // Crear objeto ligero o mutar solo la propiedad clave
-      item.parsedDate = parsedDate; 
-      dataNormalized[i] = item;
-
-      const seller = item.vendedor;
-      if (seller && !EXCLUDED_SELLERS_SET.has(seller)) {
-        initialFilteredRows.push(item);
-      }
-
-      // Llenar sets
-      if (seller) sellersSet.add(seller);
-      if (item.linea) linesSet.add(item.linea);
-      if (item.co) citiesSet.add(item.co);
-      if (item.typeClient) clientTypesSet.add(item.typeClient);
-      if (item.proveedor) suppliersSet.add(item.proveedor);
-      if (item.descLp) listPriceSet.add(item.descLp);
-
-      // Obtener año rápido
-      if (rawDate) {
-        if (typeof rawDate === 'string') {
-          const yearSlice = rawDate.slice(0, 4); // Si es YYYY-MM-DD es instantáneo O(1)
-          if (!isNaN(yearSlice) && yearSlice.length === 4) {
-            yearsSet.add(yearSlice);
-          } else {
-            const match = rawDate.match(/\d{4}/);
-            if (match) yearsSet.add(match[0]);
-          }
-        } else if (rawDate instanceof Date) {
-          yearsSet.add(String(rawDate.getFullYear()));
-        }
-      }
-    }
-
-    const allUniqueSellers = Array.from(sellersSet);
-    const defaultSelectedSellers = allUniqueSellers.filter(s => !EXCLUDED_SELLERS_SET.has(s));
-    const uniqueYears = Array.from(yearsSet).sort((a, b) => b - a);
-    const uniqueMonth = mesesConNumero.map(m => m.nombre);
-
-    const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === CURRENT_MONTH_NUM_STR);
-    const currentMonthName = currentMonthObj?.nombre;
-
-    const defaultYear = uniqueYears.includes(CURRENT_YEAR_STR) ? CURRENT_YEAR_STR : (uniqueYears[0] || '');
-    const defaultMonthName = (currentMonthName && uniqueMonth.includes(currentMonthName))
-      ? currentMonthName
-      : (uniqueMonth[0] || '');
-
-    // 1. Guardar datos crudos
-    setRawSalesData(dataNormalized);
-    
-    // 2. Establecer opciones de filtro
-    setFilterOptions({
-      sellers: allUniqueSellers,
-      lines: Array.from(linesSet),
-      cities: Array.from(citiesSet),
-      clientTypes: Array.from(clientTypesSet),
-      years: uniqueYears,
-      months: uniqueMonth,
-      suppliers: Array.from(suppliersSet),
-      listPrice: Array.from(listPriceSet)
+  const loadData = async () => {
+    // 1. Mostrar Modal de Carga
+    Swal.fire({
+      title: 'Cargando',
+      text: 'Por favor, espera mientras carga la información...',
+      allowOutsideClick: false,
+      showConfirmButton: false,
+      didOpen: () => Swal.showLoading()
     });
 
-    // 3. Al cambiar 'setFilters', el useEffect de filtrado principal se activará
-    // y calculará automáticamente las filas filtradas, los KPIs y la paginación.
-    // Evitas calcular KPIs 2 veces aquí.
-    setFilters(prev => ({
-      ...prev,
-      seller: defaultSelectedSellers,
-      year: defaultYear || prev.year,
-      month: defaultMonthName ? [defaultMonthName] : prev.month
-    }));
+    const currentYear = CURRENT_DATE.getFullYear();
 
-  }, []);
+    try {
+      const [budgetsRes, marginsRes, salesRes] = await Promise.all([
+        findBudgets(currentYear),
+        findMargins(currentYear),
+        findSales(currentYear)
+      ]);
+
+      if (!isMounted) return;
+
+      const budgets = budgetsRes.data || [];
+      const margins = marginsRes.data || [];
+      const sales = salesRes.data || [];
+
+      // Presupuestos
+      let budgetYearTotal = 0;
+      for (let i = 0; i < budgets.length; i++) {
+        budgetYearTotal += Number(budgets[i].monto) || 0;
+      }
+      setTotalBudget(budgets);
+      setYearBudget(budgetYearTotal);
+
+      // Márgenes
+      let marginSum = 0;
+      const marginLen = margins.length;
+      for (let i = 0; i < marginLen; i++) {
+        marginSum += Number(margins[i].expectedMargin) || 0;
+      }
+      setTotalMargin(margins);
+      setYearMargin(marginLen > 0 ? (marginSum / marginLen).toFixed(2) : '0.00');
+
+      // --- TRUCO DE RENDIMIENTO ---
+      // Usar setTimeout para permitir que la interfaz respire y el SweetAlert
+      // se dibuje en pantalla antes de procesar las filas en el hilo principal.
+      setTimeout(() => {
+        if (isMounted) {
+          procesoInicial(sales);
+          Swal.close();
+        }
+      }, 50);
+
+    } catch (error) {
+      console.error('Error al cargar la información:', error);
+      if (isMounted) {
+        Swal.fire('Error', 'No se pudo cargar la información', 'error');
+      }
+    }
+  };
+
+  loadData();
+
+  return () => {
+    isMounted = false;
+  };
+}, []);
+
+const procesoInicial = useCallback((data) => {
+  const dataLen = data.length;
+
+  const sellersSet = new Set();
+  const linesSet = new Set();
+  const citiesSet = new Set();
+  const clientTypesSet = new Set();
+  const suppliersSet = new Set();
+  const listPriceSet = new Set();
+  const yearsSet = new Set();
+
+  const initialFilteredRows = [];
+  const dataNormalized = new Array(dataLen);
+
+  for (let i = 0; i < dataLen; i++) {
+    const item = data[i];
+
+    // Optimización en Date: Si ya es String ISO o Date, evitar reconvertir innecesariamente
+    const rawDate = item.date;
+    const parsedDate = rawDate instanceof Date ? rawDate : normalizeDate(rawDate);
+    
+    // Crear objeto ligero o mutar solo la propiedad clave
+    item.parsedDate = parsedDate; 
+    dataNormalized[i] = item;
+
+    const seller = item.vendedor;
+    if (seller && !EXCLUDED_SELLERS_SET.has(seller)) {
+      initialFilteredRows.push(item);
+    }
+
+    // Llenar sets
+    if (seller) sellersSet.add(seller);
+    if (item.linea) linesSet.add(item.linea);
+    if (item.co) citiesSet.add(item.co);
+    if (item.typeClient) clientTypesSet.add(item.typeClient);
+    if (item.proveedor) suppliersSet.add(item.proveedor);
+    if (item.descLp) listPriceSet.add(item.descLp);
+
+    // Obtener año rápido
+    if (rawDate) {
+      if (typeof rawDate === 'string') {
+        const yearSlice = rawDate.slice(0, 4); // Si es YYYY-MM-DD
+        if (!isNaN(yearSlice) && yearSlice.length === 4) {
+          yearsSet.add(yearSlice);
+        } else {
+          const match = rawDate.match(/\d{4}/);
+          if (match) yearsSet.add(match[0]);
+        }
+      } else if (rawDate instanceof Date) {
+        yearsSet.add(String(rawDate.getFullYear()));
+      }
+    }
+  }
+
+  const allUniqueSellers = Array.from(sellersSet);
+  const defaultSelectedSellers = allUniqueSellers.filter(s => !EXCLUDED_SELLERS_SET.has(s));
+  const uniqueYears = Array.from(yearsSet).sort((a, b) => b - a);
+  const uniqueMonth = mesesConNumero.map(m => m.nombre);
+
+  const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === CURRENT_MONTH_NUM_STR);
+  const currentMonthName = currentMonthObj?.nombre;
+
+  const defaultYear = uniqueYears.includes(CURRENT_YEAR_STR) ? CURRENT_YEAR_STR : (uniqueYears[0] || '');
+  const defaultMonthName = (currentMonthName && uniqueMonth.includes(currentMonthName))
+    ? currentMonthName
+    : (uniqueMonth[0] || '');
+
+  // 1. Guardar datos crudos
+  setRawSalesData(dataNormalized);
+  
+  // 2. Establecer opciones de filtro
+  setFilterOptions({
+    sellers: allUniqueSellers,
+    lines: Array.from(linesSet),
+    cities: Array.from(citiesSet),
+    clientTypes: Array.from(clientTypesSet),
+    years: uniqueYears,
+    months: uniqueMonth,
+    suppliers: Array.from(suppliersSet),
+    listPrice: Array.from(listPriceSet)
+  });
+
+  // 3. Al cambiar 'setFilters', el useEffect de filtrado principal calculará automáticamente 
+  // las filas filtradas y los KPIs sin recalcular innecesariamente aquí.
+  setFilters(prev => ({
+    ...prev,
+    seller: defaultSelectedSellers,
+    year: defaultYear || prev.year,
+    month: defaultMonthName ? [defaultMonthName] : prev.month
+  }));
+
+}, []);
 
   const mesesConNumero = [
     { numero: '01', nombre: "Enero", abreviatura: "Ene" },
@@ -1171,86 +1170,84 @@ export default function Ventas() {
     return !isNaN(fallbackDate.getTime()) ? fallbackDate : null;
   };
 
-  useEffect(() => {
-    let filtered = [...rawSalesData];
+useEffect(() => {
+  let filtered = [...rawSalesData];
 
-    // 1. FILTRO DE AÑO
-    if (filters.year) {
-      filtered = filtered.filter(row => {
-        if (!row.parsedDate) return false;
-        return String(row.parsedDate.getFullYear()) === String(filters.year);
-      });
-    }
+  // 1. FILTRO DE AÑO
+  if (filters.year) {
+    filtered = filtered.filter(row => {
+      if (!row.parsedDate) return false;
+      return String(row.parsedDate.getFullYear()) === String(filters.year);
+    });
+  }
 
-    // 2. FILTRO DE MES
-    if (filters.month && filters.month.length > 0) {
-      const selectedMonthNames = filters.month.map(m => m.value || m);
+  // 2. FILTRO DE MES
+  if (filters.month && filters.month.length > 0) {
+    const selectedMonthNames = filters.month.map(m => m.value || m);
 
-      filtered = filtered.filter(row => {
-        if (!row.parsedDate){
-          return false
-        } else if(row.parsedDate) {
-          // Obtener el número del mes ("01", "02", ..., "12")
-          const monthNum = String(row.parsedDate.getMonth() + 1).padStart(2, '0');
-          const monthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === monthNum);
-  
-          return monthObj ? selectedMonthNames.includes(monthObj.nombre) : false;
-        } 
-      });
-    }
+    filtered = filtered.filter(row => {
+      if (!row.parsedDate) {
+        return false;
+      } else {
+        const monthNum = String(row.parsedDate.getMonth() + 1).padStart(2, '0');
+        const monthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === monthNum);
 
-    // 3. FILTRO POR RANGO DE FECHAS (startDate y endDate)
-    if (filters.startDate || filters.endDate) {
-      filtered = filtered.filter(row => {
-        if (!row.parsedDate) return false;
+        return monthObj ? selectedMonthNames.includes(monthObj.nombre) : false;
+      }
+    });
+  }
 
-        const rowDate = row.parsedDate;
+  // 3. FILTRO POR RANGO DE FECHAS (startDate y endDate)
+  if (filters.startDate || filters.endDate) {
+    filtered = filtered.filter(row => {
+      if (!row.parsedDate) return false;
 
-        if (filters.startDate) {
-          const [sYear, sMonth, sDay] = filters.startDate.split('-').map(Number);
-          const start = new Date(sYear, sMonth - 1, sDay, 0, 0, 0);
-          if (rowDate < start) return false;
-        }
+      const rowDate = row.parsedDate;
 
-        if (filters.endDate) {
-          const [eYear, eMonth, eDay] = filters.endDate.split('-').map(Number);
-          const end = new Date(eYear, eMonth - 1, eDay, 23, 59, 59);
-          if (rowDate > end) return false;
-        }
+      if (filters.startDate) {
+        const [sYear, sMonth, sDay] = filters.startDate.split('-').map(Number);
+        const start = new Date(sYear, sMonth - 1, sDay, 0, 0, 0);
+        if (rowDate < start) return false;
+      }
 
-        return true;
-      });
-    }
+      if (filters.endDate) {
+        const [eYear, eMonth, eDay] = filters.endDate.split('-').map(Number);
+        const end = new Date(eYear, eMonth - 1, eDay, 23, 59, 59);
+        if (rowDate > end) return false;
+      }
 
-    // 🎯 4. OTROS FILTROS (Vendedor, Línea, Agencia, etc.)
-    if (filters.seller?.length > 0) {
-      filtered = filtered.filter(row => filters.seller.includes(row.vendedor));
-    }
-    if (filters.line?.length > 0) {
-      filtered = filtered.filter(row => filters.line.includes(row.linea));
-    }
-    if (filters.city?.length > 0) {
-      filtered = filtered.filter(row => filters.city.includes(row.co));
-    }
-    if (filters.clientType?.length > 0) {
-      filtered = filtered.filter(row => filters.clientType.includes(row.typeClient));
-    }
-    if (filters.supplier?.length > 0) {
-      filtered = filtered.filter(row => filters.supplier.includes(row.proveedor));
-    }
-    if (filters.listPrice?.length > 0) {
-      filtered = filtered.filter(row => filters.listPrice.includes(row.descLp));
-    }
+      return true;
+    });
+  }
 
-    // Actualización de estado y KPIs
-    setSalesData(filtered);
-    setSalesRowsCount(filtered.length);
-    setCurrentPage(1);
+  // 4. OTROS FILTROS (Vendedor, Línea, Agencia, etc.)
+  if (filters.seller?.length > 0) {
+    filtered = filtered.filter(row => filters.seller.includes(row.vendedor));
+  }
+  if (filters.line?.length > 0) {
+    filtered = filtered.filter(row => filters.line.includes(row.linea));
+  }
+  if (filters.city?.length > 0) {
+    filtered = filtered.filter(row => filters.city.includes(row.co));
+  }
+  if (filters.clientType?.length > 0) {
+    filtered = filtered.filter(row => filters.clientType.includes(row.typeClient));
+  }
+  if (filters.supplier?.length > 0) {
+    filtered = filtered.filter(row => filters.supplier.includes(row.proveedor));
+  }
+  if (filters.listPrice?.length > 0) {
+    filtered = filtered.filter(row => filters.listPrice.includes(row.descLp));
+  }
 
-    const filteredKpis = calculateKPIs(filtered, yearMargin);
-    setKpiData(filteredKpis);
+  // Actualización de estado y KPIs
+  setSalesData(filtered);
+  setSalesRowsCount(filtered.length);
 
-  }, [filters, rawSalesData]);
+  const filteredKpis = calculateKPIs(filtered, yearMargin);
+  setKpiData(filteredKpis);
+
+}, [filters, rawSalesData]);
 
   const exportToExcel = () => {
     console.log("Exportando a Excel...");
@@ -3566,33 +3563,33 @@ export default function Ventas() {
 
                         {/* Leyenda en la parte inferior personalizada */}
                         <Legend
-                verticalAlign="bottom"
-                content={({ payload }) => (
-                  <div className="d-flex flex-wrap justify-content-center gap-x-3 gap-y-1 pt-2" style={{ fontSize: '12px' }}>
-                    {payload.map((entry, index) => (
-                      <div 
-                        key={`item-${index}`} 
-                        className="d-flex align-items-center me-3 mb-1"
-                        style={{ whiteSpace: 'nowrap' }}
-                      >
-                        <span
-                          style={{
-                            width: '10px',
-                            height: '10px',
-                            backgroundColor: entry.color,
-                            borderRadius: '50%',
-                            display: 'inline-block',
-                            marginRight: '2px' // 👈 Distancia exacta y corta entre el punto y el texto
-                          }}
+                          verticalAlign="bottom"
+                          content={({ payload }) => (
+                            <div className="d-flex flex-wrap justify-content-center gap-x-3 gap-y-1 pt-2" style={{ fontSize: '12px' }}>
+                              {payload.map((entry, index) => (
+                                <div 
+                                  key={`item-${index}`} 
+                                  className="d-flex align-items-center me-3 mb-1"
+                                  style={{ whiteSpace: 'nowrap' }}
+                                >
+                                  <span
+                                    style={{
+                                      width: '10px',
+                                      height: '10px',
+                                      backgroundColor: entry.color,
+                                      borderRadius: '50%',
+                                      display: 'inline-block',
+                                      marginRight: '2px' // 👈 Distancia exacta y corta entre el punto y el texto
+                                    }}
+                                  />
+                                  <span style={{ color: entry.color, fontWeight: '600' }}>
+                                    {entry.value}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         />
-                        <span style={{ color: entry.color, fontWeight: '600' }}>
-                          {entry.value}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              />
                       </PieChart>
                     </ResponsiveContainer>
                   );
@@ -3757,7 +3754,7 @@ export default function Ventas() {
       </div>
 
       {/* PANEL: DETALLE DE VENTAS */}
-      <div className="panel rounded shadow-sm mb-4">
+      {/* <div className="panel rounded shadow-sm mb-4">
         <div className="panel-head p-3 border-bottom d-flex justify-content-between align-items-center">
           <h2 className="h5 mb-0 fw-bold">Detalle de ventas</h2>
           <span className="badge bg-secondary p-2">{salesRowsCount.toLocaleString()} Registros</span>
@@ -3849,7 +3846,7 @@ export default function Ventas() {
             </div>
           </div>
         )}
-      </div>
+      </div> */}
 
     </div>
   );
