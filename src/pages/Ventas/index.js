@@ -423,21 +423,18 @@ export default function Ventas() {
     let isMounted = true;
 
     const loadData = async () => {
-      // 1. Desactivar animaciones pesadas de SweetAlert para evitar congelamiento de interfaz
+      // 1. Mostrar Modal de Carga
       Swal.fire({
         title: 'Cargando',
         text: 'Por favor, espera mientras carga la información...',
         allowOutsideClick: false,
         showConfirmButton: false,
-        didOpen: () => {
-          Swal.showLoading();
-        }
+        didOpen: () => Swal.showLoading()
       });
 
       const currentYear = CURRENT_DATE.getFullYear();
 
       try {
-        // 2. Peticiones paralelas
         const [budgetsRes, marginsRes, salesRes] = await Promise.all([
           findBudgets(currentYear),
           findMargins(currentYear),
@@ -450,7 +447,7 @@ export default function Ventas() {
         const margins = marginsRes.data || [];
         const sales = salesRes.data || [];
 
-        // --- Procesar Presupuestos (Calculado eficientemente) ---
+        // Presupuestos
         let budgetYearTotal = 0;
         for (let i = 0; i < budgets.length; i++) {
           budgetYearTotal += Number(budgets[i].monto) || 0;
@@ -458,7 +455,7 @@ export default function Ventas() {
         setTotalBudget(budgets);
         setYearBudget(budgetYearTotal);
 
-        // --- Procesar Márgenes ---
+        // Márgenes
         let marginSum = 0;
         const marginLen = margins.length;
         for (let i = 0; i < marginLen; i++) {
@@ -467,17 +464,20 @@ export default function Ventas() {
         setTotalMargin(margins);
         setYearMargin(marginLen > 0 ? (marginSum / marginLen).toFixed(2) : '0.00');
 
-        // --- Procesar Ventas ---
-        procesoInicial(sales);
+        // --- TRUCO DE RENDIMIENTO ---
+        // Usar setTimeout para permitir que la interfaz respire y el SweetAlert
+        // se dibuje en pantalla antes de congelar el hilo procesando las 40.000 filas.
+        setTimeout(() => {
+          if (isMounted) {
+            procesoInicial(sales);
+            Swal.close();
+          }
+        }, 50);
 
       } catch (error) {
         console.error('Error al cargar la información:', error);
         if (isMounted) {
           Swal.fire('Error', 'No se pudo cargar la información', 'error');
-        }
-      } finally {
-        if (isMounted) {
-          Swal.close();
         }
       }
     };
@@ -491,8 +491,7 @@ export default function Ventas() {
 
   const procesoInicial = useCallback((data) => {
     const dataLen = data.length;
-    
-    // Estructuras para Sets
+
     const sellersSet = new Set();
     const linesSet = new Set();
     const citiesSet = new Set();
@@ -504,52 +503,63 @@ export default function Ventas() {
     const initialFilteredRows = [];
     const dataNormalized = new Array(dataLen);
 
-    // OPTIMIZACIÓN CRÍTICA: Iterador for directo sin spreads innecesarios
     for (let i = 0; i < dataLen; i++) {
       const item = data[i];
 
-      // 1. Mutar/asignar directamente para evitar la sobrecarga de destructuring ({...item})
-      const parsedDate = normalizeDate(item.date);
+      // Optimización en Date: Si ya es String ISO o Date, evitar reconvertir innecesariamente
+      const rawDate = item.date;
+      const parsedDate = rawDate instanceof Date ? rawDate : normalizeDate(rawDate);
+      
+      // Crear objeto ligero o mutar solo la propiedad clave
       item.parsedDate = parsedDate; 
       dataNormalized[i] = item;
 
-      // 2. Búsqueda O(1) con Set en lugar de O(N) con Array.includes
-      const isExcluded = EXCLUDED_SELLERS_SET.has(item.vendedor);
-      if (!isExcluded) {
+      const seller = item.vendedor;
+      if (seller && !EXCLUDED_SELLERS_SET.has(seller)) {
         initialFilteredRows.push(item);
       }
 
-      // 3. Extracción directo con evaluación de existencia rápida
-      if (item.vendedor) sellersSet.add(item.vendedor);
+      // Llenar sets
+      if (seller) sellersSet.add(seller);
       if (item.linea) linesSet.add(item.linea);
       if (item.co) citiesSet.add(item.co);
       if (item.typeClient) clientTypesSet.add(item.typeClient);
       if (item.proveedor) suppliersSet.add(item.proveedor);
       if (item.descLp) listPriceSet.add(item.descLp);
 
-      // 4. Extracción rápida de años mediante RegEx/Substring sin instanciar 'new Date()'
-      if (item.date) {
-        if (typeof item.date === 'string') {
-          const yearMatch = item.date.match(/\d{4}/);
-          if (yearMatch) yearsSet.add(yearMatch[0]);
-        } else if (item.date instanceof Date) {
-          yearsSet.add(String(item.date.getFullYear()));
+      // Obtener año rápido
+      if (rawDate) {
+        if (typeof rawDate === 'string') {
+          const yearSlice = rawDate.slice(0, 4); // Si es YYYY-MM-DD es instantáneo O(1)
+          if (!isNaN(yearSlice) && yearSlice.length === 4) {
+            yearsSet.add(yearSlice);
+          } else {
+            const match = rawDate.match(/\d{4}/);
+            if (match) yearsSet.add(match[0]);
+          }
+        } else if (rawDate instanceof Date) {
+          yearsSet.add(String(rawDate.getFullYear()));
         }
       }
     }
 
-    // Convertir Sets a Arrays una sola vez
     const allUniqueSellers = Array.from(sellersSet);
     const defaultSelectedSellers = allUniqueSellers.filter(s => !EXCLUDED_SELLERS_SET.has(s));
     const uniqueYears = Array.from(yearsSet).sort((a, b) => b - a);
     const uniqueMonth = mesesConNumero.map(m => m.nombre);
 
-    // Actualizaciones de Estado en Lote (Batching)
-    setRawSalesData(dataNormalized);
-    setSalesData(initialFilteredRows);
-    setSalesRowsCount(initialFilteredRows.length);
-    setCurrentPage(1);
+    const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === CURRENT_MONTH_NUM_STR);
+    const currentMonthName = currentMonthObj?.nombre;
 
+    const defaultYear = uniqueYears.includes(CURRENT_YEAR_STR) ? CURRENT_YEAR_STR : (uniqueYears[0] || '');
+    const defaultMonthName = (currentMonthName && uniqueMonth.includes(currentMonthName))
+      ? currentMonthName
+      : (uniqueMonth[0] || '');
+
+    // 1. Guardar datos crudos
+    setRawSalesData(dataNormalized);
+    
+    // 2. Establecer opciones de filtro
     setFilterOptions({
       sellers: allUniqueSellers,
       lines: Array.from(linesSet),
@@ -561,14 +571,9 @@ export default function Ventas() {
       listPrice: Array.from(listPriceSet)
     });
 
-    const currentMonthObj = mesesConNumero.find(m => String(m.numero).padStart(2, '0') === CURRENT_MONTH_NUM_STR);
-    const currentMonthName = currentMonthObj?.nombre;
-
-    const defaultYear = uniqueYears.includes(CURRENT_YEAR_STR) ? CURRENT_YEAR_STR : (uniqueYears[0] || '');
-    const defaultMonthName = (currentMonthName && uniqueMonth.includes(currentMonthName))
-      ? currentMonthName
-      : (uniqueMonth[0] || '');
-
+    // 3. Al cambiar 'setFilters', el useEffect de filtrado principal se activará
+    // y calculará automáticamente las filas filtradas, los KPIs y la paginación.
+    // Evitas calcular KPIs 2 veces aquí.
     setFilters(prev => ({
       ...prev,
       seller: defaultSelectedSellers,
@@ -576,8 +581,6 @@ export default function Ventas() {
       month: defaultMonthName ? [defaultMonthName] : prev.month
     }));
 
-    // KPIs
-    setKpiData(calculateKPIs(initialFilteredRows));
   }, []);
 
   const mesesConNumero = [
@@ -595,10 +598,12 @@ export default function Ventas() {
     { numero: '12', nombre: "Diciembre", abreviatura: "Dic" }
   ];
 
-  const calculateGoal = (mesesInput, year) => {
-    // 1. Normalizar 'mesesInput' a un Array de strings limpios en mayúsculas
-    let selectedMonths = [];
+  // 1. CALCULAR META (GOAL)
+  const calculateGoal = (mesesInput, year, budgetList = totalBudget) => {
+    if (!budgetList || budgetList.length === 0) return 0;
 
+    // Normalizar meses seleccionados
+    let selectedMonths = [];
     if (Array.isArray(mesesInput)) {
       selectedMonths = mesesInput
         .map(m => (m?.value || m || '').toString().trim().toUpperCase())
@@ -608,103 +613,99 @@ export default function Ventas() {
       if (cleanStr) selectedMonths = [cleanStr];
     }
 
-    // 2. Filtrar presupuestos por año
-    let datosFiltrados = totalBudget.filter(
-      item => Number(item.anio) === Number(year)
-    );
+    const hasMonthsFilter = selectedMonths.length > 0;
+    // Búsqueda instantánea O(1) con Set
+    const selectedMonthsSet = hasMonthsFilter ? new Set(selectedMonths) : null;
+    const targetYear = Number(year);
 
-    // 3. Si hay meses seleccionados, filtrar adicionalmente por esos meses
-    if (selectedMonths.length > 0) {
-      datosFiltrados = datosFiltrados.filter(item => {
-        const itemMes = item.mes ? String(item.mes).trim().toUpperCase() : '';
-        return selectedMonths.includes(itemMes);
-      });
+    let suma = 0;
+
+    // Un único bucle 'for' directo (mucho más rápido que .filter().reduce())
+    for (let i = 0; i < budgetList.length; i++) {
+      const item = budgetList[i];
+
+      if (Number(item.anio) === targetYear) {
+        if (!hasMonthsFilter) {
+          suma += Number(item.monto) || 0;
+        } else {
+          const itemMes = item.mes ? String(item.mes).trim().toUpperCase() : '';
+          if (selectedMonthsSet.has(itemMes)) {
+            suma += Number(item.monto) || 0;
+          }
+        }
+      }
     }
 
-    // 4. Sumar los montos
-    const suma = datosFiltrados.reduce((acumulador, item) => {
-      const montoNumerico = Number(item.monto) || 0;
-      return acumulador + montoNumerico;
-    }, 0);
-
-    // 5. Actualizar estado y retornar
-    setYearBudget(suma);
-    return suma;
+    return suma; // Retorna solo el valor numérico (Sin disparar setYearBudget)
   };
 
-  const calculateMargin = (mesesInput = [], year, citiesInput = []) => {
-    // Diccionario para convertir nombres a números de mes
-    const monthMap = {
-      'Enero': '1', 'Febrero': '2', 'Marzo': '3', 'Abril': '4',
-      'Mayo': '5', 'Junio': '6', 'Julio': '7', 'Agosto': '8',
-      'Septiembre': '9', 'Octubre': '10', 'Noviembre': '11', 'Diciembre': '12',
-    };
+  // 2. CALCULAR MARGEN (MARGIN)
+  const monthMap = {
+    'ENERO': '1', 'FEBRERO': '2', 'MARZO': '3', 'ABRIL': '4',
+    'MAYO': '5', 'JUNIO': '6', 'JULIO': '7', 'AGOSTO': '8',
+    'SEPTIEMBRE': '9', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12',
+  };
 
-    // 1. Extraer MESES y normalizar tanto el texto original como su equivalente numérico
+  const calculateMargin = (mesesInput = [], year, citiesInput = [], marginList = totalMargin, fallbackMargin = yearMargin) => {
+    if (!marginList || marginList.length === 0) return Number(fallbackMargin) || 0;
+
+    // 1. Normalizar Meses
     const selectedMonths = (Array.isArray(mesesInput) ? mesesInput : [mesesInput])
       .map(m => (typeof m === 'object' && m !== null ? m.value : m))
       .filter(Boolean)
       .map(m => String(m).trim().toUpperCase());
 
-    // Convertimos nombres ("ENERO") a números ("1") para tener ambos formatos disponibles
-    const normalizedMonthNumbers = selectedMonths.map(m => monthMap[m] || m);
+    const monthSet = new Set(selectedMonths);
+    const monthNumSet = new Set(selectedMonths.map(m => monthMap[m] || m));
 
-    // 2. Extraer y limpiar CIUDADES/C.O.
+    // 2. Normalizar Ciudades
     const selectedCities = (Array.isArray(citiesInput) ? citiesInput : [citiesInput])
       .map(c => (typeof c === 'object' && c !== null ? c.value : c))
       .filter(Boolean)
       .map(c => String(c).trim().padStart(3, '0'));
 
-    // 3. Filtrar `totalMargin` de forma aditiva
-    const datosFiltrados = totalMargin.filter(item => {
-      // A. Filtro por AÑO (Obligatorio)
-      if (year && Number(item.anio) !== Number(year)) {
-        return false;
-      }
+    const citySet = new Set(selectedCities);
 
-      // B. Filtro por MES
-      if (selectedMonths.length > 0) {
+    const hasMonths = monthSet.size > 0;
+    const hasCities = citySet.size > 0;
+    const targetYear = Number(year);
+
+    let suma = 0;
+    let count = 0;
+
+    // Un solo bucle 'for'
+    for (let i = 0; i < marginList.length; i++) {
+      const item = marginList[i];
+
+      // Filtro Año
+      if (targetYear && Number(item.anio) !== targetYear) continue;
+
+      // Filtro Mes
+      if (hasMonths) {
         const rawMes = String(item.mes || '').trim();
-        const itemMesText = rawMes.toUpperCase(); // Por si item.mes fuera texto "ENERO"
-        const itemMesNum = String(Number(rawMes) || ''); // Convierte "01" o 1 a "1"
+        const itemMesText = rawMes.toUpperCase();
+        const itemMesNum = String(Number(rawMes) || '');
 
-        // Compara contra textos ("ENERO") o contra números ("1")
-        const matchMonth = 
-          selectedMonths.includes(itemMesText) || 
-          normalizedMonthNumbers.includes(itemMesNum) ||
-          normalizedMonthNumbers.includes(rawMes);
-
-        if (!matchMonth) return false;
+        const matchMonth = monthSet.has(itemMesText) || monthNumSet.has(itemMesNum) || monthNumSet.has(rawMes);
+        if (!matchMonth) continue;
       }
 
-      // C. Filtro por CIUDAD/C.O.
-      if (selectedCities.length > 0) {
+      // Filtro Ciudad
+      if (hasCities) {
         const itemCo = String(item.co || '').trim().padStart(3, '0');
-        const matchCity = selectedCities.includes(itemCo);
-        if (!matchCity) return false;
+        if (!citySet.has(itemCo)) continue;
       }
 
-      return true;
-    });
-
-    // 4. Si no hay coincidencias tras aplicar los filtros
-    if (datosFiltrados.length === 0) {
-      const fallback = Number(yearMargin) || 0;
-      setYearBudget(fallback.toFixed(2));
-      return fallback;
+      suma += Number(item.expectedMargin) || 0;
+      count++;
     }
 
-    // 5. Calcular promedio exacto de los datos filtrados
-    const suma = datosFiltrados.reduce((acumulador, item) => {
-      return acumulador + (Number(item.expectedMargin) || 0);
-    }, 0);
+    if (count === 0) {
+      return Number(fallbackMargin) || 0;
+    }
 
-    const result = suma / datosFiltrados.length;
-    const marginFormatted = parseFloat(result.toFixed(2));
-
-    // 6. Actualizar estado y retornar
-    setYearBudget(marginFormatted.toFixed(2));
-    return marginFormatted;
+    const result = suma / count;
+    return parseFloat(result.toFixed(2)); // Devuelve el número directamente
   };
 
   const parseCurrencyToNumber = (value) => {
@@ -3784,8 +3785,6 @@ export default function Ventas() {
                 <th>Valor bruto</th>
                 <th>Márgen promedio</th>
                 <th>Lista de precio</th>
-                {/* <th>Lista de precios</th>
-                <th>U.M.</th> */}
               </tr>
             </thead>
             <tbody>
@@ -3817,8 +3816,6 @@ export default function Ventas() {
                     <td className="fw-bold text-success">${Number(row.valor || 0).toLocaleString('es-CO')}</td>
                     <td>{row.margen}</td>
                     <td>{row.DescLp}</td>
-                    {/* <td>{row.listaPrecios}</td>
-                    <td>{row.um}</td> */}
                   </tr>
                 ))
               )}
@@ -3826,7 +3823,6 @@ export default function Ventas() {
           </table>
         </div>
 
-        {/* 🎯 BOTONERA DE PAGINACIÓN DE BOOTSTRAP */}
         {totalPages > 1 && (
           <div className="d-flex flex-column flex-sm-row justify-content-between align-items-center p-3 border-top gap-2">
             <span className="small">
